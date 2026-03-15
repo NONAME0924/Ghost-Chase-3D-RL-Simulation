@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost Chase — 3D RL Simulation</title>
+    <meta name="description" content="A 3D Ghost Chase simulation powered by reinforcement learning. Watch AI agents train and play hunter vs prey in real-time.">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+        <div class="loader-content">
+            <div class="loader-spinner"></div>
+            <h1 class="loader-title">GHOST CHASE</h1>
+            <p class="loader-subtitle">3D Reinforcement Learning Simulation</p>
+            <p class="loader-status" id="loader-status">Connecting to server...</p>
+        </div>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div id="hud">
+        <!-- Top Bar -->
+        <div class="hud-top">
+            <div class="hud-logo">
+                <span class="logo-icon">👻</span>
+                <span class="logo-text">GHOST CHASE</span>
+                <span class="logo-badge">RL</span>
+            </div>
+            <div class="hud-stats">
+                <div class="stat-item" id="stat-episode">
+                    <div class="stat-label">EPISODE</div>
+                    <div class="stat-value" id="episode-count">0</div>
+                </div>
+                <div class="stat-item" id="stat-captures">
+                    <div class="stat-label">CAPTURES</div>
+                    <div class="stat-value" id="capture-count">0</div>
+                </div>
+                <div class="stat-item" id="stat-steps">
+                    <div class="stat-label">STEPS</div>
+                    <div class="stat-value" id="step-count">0</div>
+                </div>
+                <div class="stat-item" id="stat-distance">
+                    <div class="stat-label">DISTANCE</div>
+                    <div class="stat-value" id="distance-value">—</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Training Panel (right side) -->
+        <div class="hud-middle">
+            <div class="train-panel" id="train-panel">
+                <div class="train-header">
+                    <span class="train-title">🧠 TRAINING</span>
+                    <span class="train-badge" id="train-status-badge">RUNNING</span>
+                </div>
+
+                <!-- Progress bar -->
+                <div class="train-progress-wrap">
+                    <div class="train-progress-bar" id="train-progress-bar"></div>
+                    <span class="train-progress-text" id="train-progress-text">0 / 5000</span>
+                </div>
+
+                <!-- Training Stats Grid -->
+                <div class="train-stats-grid">
+                    <div class="train-stat">
+                        <span class="train-stat-label">Epsilon (ε)</span>
+                        <span class="train-stat-value" id="train-epsilon">1.0000</span>
+                    </div>
+                    <div class="train-stat">
+                        <span class="train-stat-label">Capture Rate</span>
+                        <span class="train-stat-value" id="train-cap-rate">0%</span>
+                    </div>
+                    <div class="train-stat">
+                        <span class="train-stat-label">Hunter Reward</span>
+                        <span class="train-stat-value hunter-color" id="train-reward-h">0.00</span>
+                    </div>
+                    <div class="train-stat">
+                        <span class="train-stat-label">Prey Reward</span>
+                        <span class="train-stat-value prey-color" id="train-reward-p">0.00</span>
+                    </div>
+                    <div class="train-stat">
+                        <span class="train-stat-label">Hunter Loss</span>
+                        <span class="train-stat-value" id="train-loss-h">0.0000</span>
+                    </div>
+                    <div class="train-stat">
+                        <span class="train-stat-label">Prey Loss</span>
+                        <span class="train-stat-value" id="train-loss-p">0.0000</span>
+                    </div>
+                </div>
+
+                <!-- Capture Rate Chart -->
+                <div class="train-chart-wrap">
+                    <div class="train-chart-label">Capture Rate History</div>
+                    <canvas id="train-chart" width="260" height="80"></canvas>
+                </div>
+
+                <!-- Speed Control -->
+                <div class="train-speed">
+                    <span class="train-speed-label">SPEED</span>
+                    <div class="speed-buttons">
+                        <button class="speed-btn" data-speed="1">🐢</button>
+                        <button class="speed-btn" data-speed="2">🚶</button>
+                        <button class="speed-btn active" data-speed="3">🏃</button>
+                        <button class="speed-btn" data-speed="4">⚡</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Bar -->
+        <div class="hud-bottom">
+            <div class="hud-controls">
+                <button class="control-btn" id="btn-pause" title="Pause/Resume">
+                    <span class="btn-icon">⏸</span>
+                </button>
+                <button class="control-btn" id="btn-reset" title="Reset">
+                    <span class="btn-icon">🔄</span>
+                </button>
+                <button class="control-btn" id="btn-fov" title="Toggle FOV">
+                    <span class="btn-icon">👁</span>
+                </button>
+                <button class="control-btn" id="btn-trails" title="Toggle Trails">
+                    <span class="btn-icon">✨</span>
+                </button>
+            </div>
+            <div class="hud-legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #ff6f3c;"></div>
+                    <span>Hunter (Ghost)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #4fc3f7;"></div>
+                    <span>Prey (Human)</span>
+                </div>
+            </div>
+            <div class="hud-connection" id="connection-status">
+                <div class="connection-dot"></div>
+                <span>Disconnected</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Captured Popup -->
+    <div id="captured-popup" class="hidden">
+        <div class="captured-text">CAPTURED!</div>
+        <div class="captured-sub">Resetting in 1s...</div>
+    </div>
+
+    <!-- Three.js Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+    <script src="js/scene.js"></script>
+    <script src="js/characters.js"></script>
+    <script src="js/network.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
