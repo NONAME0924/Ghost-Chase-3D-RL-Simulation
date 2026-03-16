@@ -119,6 +119,7 @@
         NetworkManager.on('gameReset', (state) => {
             stepCount = 0;
             CharacterManager.resetPositions(state);
+            SceneManager.setObstacles(state.obstacles);
             episodeEl.textContent = state.episode || 0;
         });
 

@@ -16,8 +16,8 @@ def train(args):
     """Main training loop."""
     env = ChaseEnv()
 
-    # State dimension = 15 (see environment.py observation)
-    state_dim = 15
+    # State dimension = 12 (see environment.py observation)
+    state_dim = 12
 
     hunter_agent = DQNAgent(
         state_dim=state_dim,
@@ -80,9 +80,10 @@ def train(args):
             prey_action = prey_agent.select_action(prey_obs, training=True)
 
             # Step environment
-            next_hunter_obs, next_prey_obs, reward_h, reward_p, done, info = env.step(
+            next_hunter_obs, next_prey_obs, reward_h, reward_p, terminated, truncated, info = env.step(
                 hunter_action, prey_action
             )
+            done = terminated or truncated
 
             # Store transitions
             hunter_agent.store_transition(hunter_obs, hunter_action, reward_h, next_hunter_obs, done)

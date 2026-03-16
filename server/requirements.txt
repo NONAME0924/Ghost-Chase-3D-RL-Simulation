@@ -2,3 +2,6 @@ torch
 numpy
 flask
 flask-socketio
+stable-baselines3
+gymnasium
+shimmy

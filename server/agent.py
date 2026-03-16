@@ -1,83 +1,25 @@
 """
-DQN Agent for the Ghost Chase game.
-
-Features:
-- Simple feedforward neural network (2 hidden layers, 128 units)
-- Epsilon-greedy exploration with decay
-- Experience replay buffer
-- Target network for stable training
-- Save/Load model persistence
+SB3Agent - A robust wrapper for Stable Baselines3 DQN.
+Supports manual training loops while keeping SB3's internal state consistent.
 """
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import numpy as np
-import random
-from collections import deque
 import os
+import numpy as np
+import torch
+import gymnasium as gym
+from stable_baselines3 import DQN
+from stable_baselines3.common.logger import configure
+from stable_baselines3.common.utils import get_linear_fn
 
-
-class QNetwork(nn.Module):
-    """Simple feedforward Q-network."""
-
-    def __init__(self, state_dim, action_dim, hidden_dim=128):
-        super(QNetwork, self).__init__()
-        self.net = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, action_dim)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class ReplayBuffer:
-    """Experience replay buffer."""
-
-    def __init__(self, capacity=50000):
-        self.buffer = deque(maxlen=capacity)
-
-    def push(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
-
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
-        return (
-            np.array(states, dtype=np.float32),
-            np.array(actions, dtype=np.int64),
-            np.array(rewards, dtype=np.float32),
-            np.array(next_states, dtype=np.float32),
-            np.array(dones, dtype=np.float32)
-        )
-
-    def __len__(self):
-        return len(self.buffer)
-
-
-class DQNAgent:
+class SB3Agent:
     """
-    DQN Agent with experience replay and target network.
-
-    Args:
-        state_dim: Dimension of state observation
-        action_dim: Number of discrete actions
-        lr: Learning rate
-        gamma: Discount factor
-        epsilon_start: Initial exploration rate
-        epsilon_end: Minimum exploration rate
-        epsilon_decay: Epsilon decay rate per episode
-        batch_size: Training batch size
-        target_update: Steps between target network updates
+    Agent wrapper for Stable Baselines3 DQN.
+    Matches the original DQNAgent interface for compatibility with app.py.
     """
 
     def __init__(
         self,
-        state_dim=15,
+        state_dim=12,
         action_dim=9,
         lr=1e-3,
         gamma=0.99,
@@ -85,112 +27,132 @@ class DQNAgent:
         epsilon_end=0.05,
         epsilon_decay=0.995,
         batch_size=64,
-        target_update=100,
-        buffer_capacity=50000
+        buffer_capacity=50000,
+        device="auto"
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.gamma = gamma
+        
+        # Create a dummy environment for SB3 initialization
+        class DummyEnv(gym.Env):
+            def __init__(self):
+                self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(state_dim,), dtype=np.float32)
+                self.action_space = gym.spaces.Discrete(action_dim)
+            def reset(self, seed=None): return np.zeros(state_dim, dtype=np.float32), {}
+            def step(self, action): return np.zeros(state_dim, dtype=np.float32), 0, False, False, {}
+
+        self.dummy_env = DummyEnv()
+        
+        # Initialize the SB3 DQN model
+        # We set exploration parameters here, but we'll also manage them manually for the log
+        self.model = DQN(
+            "MlpPolicy",
+            self.dummy_env,
+            learning_rate=lr,
+            buffer_size=buffer_capacity,
+            learning_starts=batch_size,
+            batch_size=batch_size,
+            gamma=gamma,
+            train_freq=1,
+            gradient_steps=1,
+            target_update_interval=100,
+            exploration_initial_eps=epsilon_start,
+            exploration_final_eps=epsilon_end,
+            exploration_fraction=0.5,
+            policy_kwargs=dict(net_arch=[128, 128]),
+            verbose=0,
+            device=device
+        )
+        
+        # CRITICAL: Initialize internal SB3 attributes for manual .train() calls
+        self.model.set_logger(configure(None, ["stdout"]))
+        self.model._current_progress_remaining = 1.0 # 1.0 to 0.0
+        # This is needed for the learning rate schedule
+        
+        # Manual epsilon for compatibility with app.py log
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
-        self.batch_size = batch_size
-        self.target_update = target_update
-        self.learn_step = 0
-
-        # Device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Networks
-        self.q_net = QNetwork(state_dim, action_dim).to(self.device)
-        self.target_net = QNetwork(state_dim, action_dim).to(self.device)
-        self.target_net.load_state_dict(self.q_net.state_dict())
-        self.target_net.eval()
-
-        # Optimizer
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
-
-        # Replay buffer
-        self.memory = ReplayBuffer(buffer_capacity)
+        self.total_steps = 0
 
     def select_action(self, state, training=True):
-        """Epsilon-greedy action selection."""
-        if training and random.random() < self.epsilon:
-            return random.randint(0, self.action_dim - 1)
-
-        with torch.no_grad():
-            state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.q_net(state_t)
-            return q_values.argmax(dim=1).item()
+        """Select an action using the model."""
+        # Ensure state is the right shape for SB3 (usually (12,) or (1, 12))
+        obs = np.array(state, dtype=np.float32)
+        if training:
+            action, _ = self.model.predict(obs, deterministic=False)
+        else:
+            action, _ = self.model.predict(obs, deterministic=True)
+        
+        # Sync the compatibility epsilon with SB3's internal one
+        self.epsilon = self.model.exploration_rate
+        return int(action)
 
     def store_transition(self, state, action, reward, next_state, done):
-        """Store a transition in replay buffer."""
-        self.memory.push(state, action, reward, next_state, done)
+        """Store transition in SB3 replay buffer."""
+        # SB3 buffer expects [batch_size, obs_shape]
+        obs = np.array(state, dtype=np.float32)
+        next_obs = np.array(next_state, dtype=np.float32)
+        
+        self.model.replay_buffer.add(
+            obs, 
+            next_obs, 
+            np.array([action]), 
+            np.array([reward]), 
+            np.array([done]), 
+            [{}]
+        )
+        
+        # Increment internal timestep counters
+        self.total_steps += 1
+        self.model.num_timesteps += 1
+        
+        # Update exploration rate schedule
+        # SB3 uses progress_remaining (1.0 to 0.0) for its schedules
+        self.model.exploration_rate = self.model.exploration_schedule(self.model._current_progress_remaining)
 
     def learn(self):
-        """Update Q-network from a batch of experiences."""
-        if len(self.memory) < self.batch_size:
-            return 0.0
-
-        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
-
-        states_t = torch.FloatTensor(states).to(self.device)
-        actions_t = torch.LongTensor(actions).to(self.device)
-        rewards_t = torch.FloatTensor(rewards).to(self.device)
-        next_states_t = torch.FloatTensor(next_states).to(self.device)
-        dones_t = torch.FloatTensor(dones).to(self.device)
-
-        # Current Q values
-        q_values = self.q_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
-
-        # Target Q values
-        with torch.no_grad():
-            next_q_values = self.target_net(next_states_t).max(1)[0]
-            target_q = rewards_t + self.gamma * next_q_values * (1 - dones_t)
-
-        # Loss
-        loss = nn.MSELoss()(q_values, target_q)
-
-        # Optimize
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.q_net.parameters(), 1.0)
-        self.optimizer.step()
-
-        # Update target network
-        self.learn_step += 1
-        if self.learn_step % self.target_update == 0:
-            self.target_net.load_state_dict(self.q_net.state_dict())
-
-        return loss.item()
+        """Trigger one training step."""
+        if self.model.replay_buffer.size() >= self.model.batch_size:
+            # We must ensure progress_remaining is set so LR schedule works
+            # Here we just keep it at 1.0 or decay it slowly based on a hypothetical max steps
+            # For now, 1.0 is safe to prevent crashes.
+            self.model._current_progress_remaining = max(0.01, 1.0 - (self.total_steps / 1000000))
+            
+            self.model.train(gradient_steps=1, batch_size=self.model.batch_size)
+            return 0.0 # Loss is not easily returned by SB3 .train()
+        return 0.0
 
     def decay_epsilon(self):
-        """Decay exploration rate."""
-        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+        """
+        In SB3 DQN, epsilon decay is usually handled per-step.
+        We provide this for compatibility with the original app.py loop.
+        """
+        # If we want to override SB3's internal linear decay with our exponential one:
+        # self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+        # self.model.exploration_rate = self.epsilon
+        pass
 
     def save(self, filepath):
-        """Save model weights."""
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        torch.save({
-            'q_net': self.q_net.state_dict(),
-            'target_net': self.target_net.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'epsilon': self.epsilon,
-            'learn_step': self.learn_step,
-        }, filepath)
-        print(f"Model saved to {filepath}")
+        """Save model."""
+        # SB3 adds .zip automatically if not present in some methods, 
+        # but .save() usually takes the exact path.
+        self.model.save(filepath)
 
     def load(self, filepath):
-        """Load model weights."""
-        if not os.path.exists(filepath):
-            print(f"No model found at {filepath}")
-            return False
-
-        checkpoint = torch.load(filepath, map_location=self.device, weights_only=True)
-        self.q_net.load_state_dict(checkpoint['q_net'])
-        self.target_net.load_state_dict(checkpoint['target_net'])
-        self.optimizer.load_state_dict(checkpoint['optimizer'])
-        self.epsilon = checkpoint['epsilon']
-        self.learn_step = checkpoint['learn_step']
-        print(f"Model loaded from {filepath}")
+        """Load model."""
+        # Try with and without .zip
+        path = filepath if filepath.endswith(".zip") else filepath + ".zip"
+        if not os.path.exists(path):
+            if not os.path.exists(filepath):
+                return False
+            path = filepath
+        
+        # Load the model and ensure the environment/logger are re-linked
+        self.model = DQN.load(path, env=self.dummy_env, device=self.model.device)
+        self.model.set_logger(configure(None, ["stdout"]))
+        self.model._current_progress_remaining = 1.0
         return True
+
+# Alias for backward compatibility
+DQNAgent = SB3Agent

@@ -11,9 +11,9 @@ A 3D "Ghost Chase" simulation powered by reinforcement learning. Watch AI agents
 ```
 RL/
 ├── server/
-│   ├── environment.py      # Game environment (20×20 arena, 120° FOV)
-│   ├── agent.py            # DQN agent implementation
-│   ├── train.py            # CLI-only training (optional, no visualization)
+│   ├── environment.py      # Game environment (20×20 arena, Obstacles, FOV Power-up)
+│   ├── agent.py            # Stable Baselines3 DQN wrapper
+│   ├── train.py            # CLI-only training script (updated to 12D)
 │   ├── app.py              # Unified server: live training + visualization
 │   ├── models/             # Saved trained models (.pth)
 │   └── requirements.txt    # Python dependencies
@@ -88,12 +88,12 @@ Speed can be set via CLI `--speed` flag or changed live via the UI buttons:
 
 ## 🧠 RL Design / 強化學習設計
 
-- **Algorithm**: DQN with target network and experience replay
-- **FOV**: Each agent has a **120° forward-facing** field of view
+- **Algorithm**: DQN using Stable Baselines3 (SB3)
+- **FOV**: Initial 120° forward-facing per agent; expands to 360° upon item pickup
 - **Actions**: 9 discrete (8 directions + stay)
-- **Hunter reward**: Minimize distance + capture bonus (+10)
-- **Prey reward**: Maximize distance + capture penalty (-10)
-- **Arena**: 20×20 bounded plane
+- **Hunter reward**: Minimize distance + capture bonus (+10) + visibility reward
+- **Prey reward**: Maximize distance + avoid capture + reward for hiding (staying out of hunter's FOV)
+- **Arena**: 20×20 bounded plane with static obstacles
 - **Capture**: Distance < 1.0 unit
 
 ---

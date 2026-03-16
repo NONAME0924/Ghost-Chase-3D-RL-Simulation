@@ -30,8 +30,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # === Global game state ===
 env = ChaseEnv()
-hunter_agent = DQNAgent(state_dim=15, action_dim=NUM_ACTIONS)
-prey_agent = DQNAgent(state_dim=15, action_dim=NUM_ACTIONS)
+hunter_agent = DQNAgent(state_dim=12, action_dim=NUM_ACTIONS)
+prey_agent = DQNAgent(state_dim=12, action_dim=NUM_ACTIONS)
 
 game_running = False
 paused = False
@@ -132,9 +132,10 @@ def training_loop():
             prey_action = prey_agent.select_action(prey_obs, training=True)
 
             # Step environment
-            next_h_obs, next_p_obs, reward_h, reward_p, done, info = env.step(
+            next_h_obs, next_p_obs, reward_h, reward_p, terminated, truncated, info = env.step(
                 hunter_action, prey_action
             )
+            done = terminated or truncated
 
             # Store transitions
             hunter_agent.store_transition(hunter_obs, hunter_action, reward_h, next_h_obs, done)
@@ -268,7 +269,8 @@ def demo_loop():
             hunter_action = hunter_agent.select_action(hunter_obs, training=False)
             prey_action = prey_agent.select_action(prey_obs, training=False)
 
-            hunter_obs, prey_obs, _, _, done, info = env.step(hunter_action, prey_action)
+            hunter_obs, prey_obs, _, _, terminated, truncated, info = env.step(hunter_action, prey_action)
+            done = terminated or truncated
 
             state = env.get_state()
             state["episode"] = episode_count
@@ -330,7 +332,7 @@ def on_set_speed(data):
 
 
 @socketio.on("reset")
-def on_reset():
+def on_reset(*args):
     hunter_obs, prey_obs = env.reset()
     state = env.get_state()
     state["episode"] = train_stats["episode"]

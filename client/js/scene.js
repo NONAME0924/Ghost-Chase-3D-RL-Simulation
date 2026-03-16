@@ -207,6 +207,27 @@ const SceneManager = (function () {
         renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
+    function setObstacles(obstacles) {
+        if (!obstacles || this.obstaclesCreated) return;
+
+        const wallMat = new THREE.MeshStandardMaterial({
+            color: 0x4a4a6a,
+            roughness: 0.7,
+            metalness: 0.2,
+        });
+
+        obstacles.forEach((obs) => {
+            const geo = new THREE.BoxGeometry(obs.w, 1.2, obs.d);
+            const mesh = new THREE.Mesh(geo, wallMat);
+            mesh.position.set(obs.x, 0.6, -obs.z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+        });
+
+        this.obstaclesCreated = true;
+    }
+
     function render() {
         controls.update();
         renderer.render(scene, camera);
@@ -215,5 +236,5 @@ const SceneManager = (function () {
     function getScene() { return scene; }
     function getCamera() { return camera; }
 
-    return { init, render, getScene, getCamera, ARENA_SIZE, HALF };
+    return { init, render, getScene, getCamera, setObstacles, ARENA_SIZE, HALF };
 })();

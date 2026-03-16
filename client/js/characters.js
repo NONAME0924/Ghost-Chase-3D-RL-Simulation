@@ -20,8 +20,6 @@ const CharacterManager = (function () {
     const PREY_EMISSIVE = 0x0088cc;
     const POWERUP_COLOR = 0xffdd00;
     const POWERUP_EMISSIVE = 0xffaa00;
-    const SWAP_COLOR = 0xcc44ff;
-    const SWAP_EMISSIVE = 0x9900cc;
 
     // Character objects
     let hunterGroup, preyGroup;
@@ -29,17 +27,13 @@ const CharacterManager = (function () {
     let hunterFov, preyFov;
     let hunterFovBuffed, preyFovBuffed; // 360° FOV cones
     let hunterLight, preyLight;
+    let hunterLabel, preyLabel;
     let hunterTrail = [], preyTrail = [];
 
     // Power-up objects
     let powerupGroup;
     let powerupMesh;
     let powerupLight;
-
-    // Swap item objects
-    let swapGroup;
-    let swapMesh;
-    let swapLight;
 
     // Target state (for interpolation)
     let hunterTarget = { x: 0, z: 0, angle: 0 };
@@ -49,12 +43,6 @@ const CharacterManager = (function () {
     let powerupState = { x: 0, z: 0, active: false };
     let hunterHasBuff = false;
     let preyHasBuff = false;
-
-    // Swap item state
-    let swapState = { x: 0, z: 0, active: false };
-
-    // Role swap tracking
-    let rolesSwapped = false;
 
     // Display toggling
     let showFov = true;
@@ -67,7 +55,6 @@ const CharacterManager = (function () {
         _createHunter();
         _createPrey();
         _createPowerup();
-        _createSwapItem();
     }
 
     function _createCube(color, emissive) {
@@ -147,6 +134,40 @@ const CharacterManager = (function () {
         return mesh;
     }
 
+    function _createLabel(text, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+
+        // Draw background pill
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(40, 30, 176, 68, 34);
+        } else {
+            ctx.rect(40, 30, 176, 68); // fallback
+        }
+        ctx.fill();
+
+        // Draw text
+        ctx.font = 'bold 44px "Microsoft JhengHei", Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = color;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(text, 128, 64);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        const mat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+        const sprite = new THREE.Sprite(mat);
+        sprite.scale.set(1.5, 0.75, 1);
+        sprite.position.y = 1.8; // Position above character
+        return sprite;
+    }
+
     function _createHunter() {
         hunterGroup = new THREE.Group();
 
@@ -168,10 +189,14 @@ const CharacterManager = (function () {
         hunterGroup.add(hunterLight);
 
         // Eyes (two small white cubes on front face)
-        _addEyes(hunterGroup, HUNTER_COLOR);
+        _addEyes(hunterGroup);
 
         // Direction indicator (small arrow)
         _addDirectionArrow(hunterGroup, HUNTER_COLOR);
+
+        // Label
+        hunterLabel = _createLabel('鬼', '#ff6f3c');
+        hunterGroup.add(hunterLabel);
 
         scene.add(hunterGroup);
     }
@@ -197,10 +222,14 @@ const CharacterManager = (function () {
         preyGroup.add(preyLight);
 
         // Eyes
-        _addEyes(preyGroup, PREY_COLOR);
+        _addEyes(preyGroup);
 
         // Direction indicator
         _addDirectionArrow(preyGroup, PREY_COLOR);
+
+        // Label
+        preyLabel = _createLabel('人', '#4fc3f7');
+        preyGroup.add(preyLabel);
 
         scene.add(preyGroup);
     }
@@ -254,60 +283,7 @@ const CharacterManager = (function () {
         scene.add(powerupGroup);
     }
 
-    function _createSwapItem() {
-        swapGroup = new THREE.Group();
-
-        // Torus knot (unique shape to distinguish from FOV item)
-        const geo = new THREE.TorusKnotGeometry(0.3, 0.1, 48, 8);
-        const mat = new THREE.MeshStandardMaterial({
-            color: SWAP_COLOR,
-            emissive: SWAP_EMISSIVE,
-            emissiveIntensity: 0.8,
-            roughness: 0.2,
-            metalness: 0.7,
-            transparent: true,
-            opacity: 0.9,
-        });
-        swapMesh = new THREE.Mesh(geo, mat);
-        swapMesh.position.y = 0.8;
-        swapMesh.castShadow = true;
-        swapGroup.add(swapMesh);
-
-        // Glow ring on ground (purple)
-        const ringGeo = new THREE.RingGeometry(0.5, 0.7, 32);
-        const ringMat = new THREE.MeshBasicMaterial({
-            color: SWAP_COLOR,
-            transparent: true,
-            opacity: 0.3,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-        });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.02;
-        swapGroup.add(ring);
-
-        // Point light
-        swapLight = new THREE.PointLight(SWAP_COLOR, 0.8, 6);
-        swapLight.position.set(0, 1.2, 0);
-        swapGroup.add(swapLight);
-
-        // Swap arrows icon (two small cones pointing opposite directions)
-        const arrowGeo = new THREE.ConeGeometry(0.08, 0.2, 4);
-        const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const arrowUp = new THREE.Mesh(arrowGeo, arrowMat);
-        arrowUp.position.set(0.2, 1.3, 0);
-        swapGroup.add(arrowUp);
-        const arrowDown = new THREE.Mesh(arrowGeo, arrowMat.clone());
-        arrowDown.position.set(-0.2, 1.3, 0);
-        arrowDown.rotation.z = Math.PI;
-        swapGroup.add(arrowDown);
-
-        swapGroup.visible = false;
-        scene.add(swapGroup);
-    }
-
-    function _addEyes(group, color) {
+    function _addEyes(group) {
         const eyeGeo = new THREE.BoxGeometry(0.12, 0.12, 0.05);
         const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
@@ -391,18 +367,6 @@ const CharacterManager = (function () {
         if (state.prey_fov_buff !== undefined) {
             preyHasBuff = state.prey_fov_buff;
         }
-
-        // Swap item state
-        if (state.swap_active !== undefined) {
-            swapState.x = state.swap_x;
-            swapState.z = state.swap_z;
-            swapState.active = state.swap_active;
-        }
-
-        // Role swap state
-        if (state.roles_swapped !== undefined) {
-            rolesSwapped = state.roles_swapped;
-        }
     }
 
     function update(deltaTime) {
@@ -414,16 +378,13 @@ const CharacterManager = (function () {
         preyGroup.position.z += (-preyTarget.z - preyGroup.position.z) * LERP_SPEED;
 
         // Smoothly interpolate rotations
-        // The angle from Python is in X-Z plane, map to Y rotation
-        // In Three.js, rotation.y = 0 faces +Z, but our angle=0 faces +X
-        // So we need to offset by PI/2
         const hunterTargetRotY = hunterTarget.angle + Math.PI / 2;
         const preyTargetRotY = preyTarget.angle + Math.PI / 2;
 
         hunterGroup.rotation.y = _lerpAngle(hunterGroup.rotation.y, hunterTargetRotY, LERP_SPEED);
         preyGroup.rotation.y = _lerpAngle(preyGroup.rotation.y, preyTargetRotY, LERP_SPEED);
 
-        // FOV visibility: show normal or buffed based on state
+        // FOV visibility
         if (showFov) {
             hunterFov.visible = !hunterHasBuff;
             hunterFovBuffed.visible = hunterHasBuff;
@@ -441,24 +402,10 @@ const CharacterManager = (function () {
             powerupGroup.visible = true;
             powerupGroup.position.x = powerupState.x;
             powerupGroup.position.z = -powerupState.z;
-            // Spin and bob animation
             powerupMesh.rotation.y += 0.03;
             powerupMesh.position.y = 0.8 + Math.sin(Date.now() * 0.003) * 0.15;
         } else {
             powerupGroup.visible = false;
-        }
-
-        // Swap item
-        if (swapState.active) {
-            swapGroup.visible = true;
-            swapGroup.position.x = swapState.x;
-            swapGroup.position.z = -swapState.z;
-            // Spin and bob animation
-            swapMesh.rotation.y += 0.02;
-            swapMesh.rotation.x += 0.01;
-            swapMesh.position.y = 0.8 + Math.sin(Date.now() * 0.004) * 0.15;
-        } else {
-            swapGroup.visible = false;
         }
 
         // Trail dots
@@ -469,10 +416,44 @@ const CharacterManager = (function () {
         _updateTrails(hunterTrail);
         _updateTrails(preyTrail);
 
+        // Keep normal labels
+        _updateLabel(hunterLabel, '鬼', '#ff6f3c');
+        _updateLabel(preyLabel, '人', '#4fc3f7');
+
         // Pulse glow effect
         const pulse = 0.4 + Math.sin(Date.now() * 0.003) * 0.15;
         hunterMesh.material.emissiveIntensity = hunterHasBuff ? 0.8 : pulse;
         preyMesh.material.emissiveIntensity = preyHasBuff ? 0.8 : pulse;
+    }
+
+    function _updateLabel(sprite, text, color) {
+        if (sprite.lastText === text) return;
+        
+        const canvas = sprite.material.map.image;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw background pill
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(40, 30, 176, 68, 34);
+        } else {
+            ctx.rect(40, 30, 176, 68);
+        }
+        ctx.fill();
+
+        // Draw text
+        ctx.font = 'bold 44px "Microsoft JhengHei", "PingFang TC", "Source Han Sans TC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = color;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+        ctx.shadowBlur = 6;
+        ctx.fillText(text, 128, 64);
+        
+        sprite.material.map.needsUpdate = true;
+        sprite.lastText = text;
     }
 
     function _updateTrails(trail) {
@@ -491,14 +472,12 @@ const CharacterManager = (function () {
 
     function _lerpAngle(current, target, t) {
         let diff = target - current;
-        // Normalize to [-PI, PI]
         while (diff > Math.PI) diff -= 2 * Math.PI;
         while (diff < -Math.PI) diff += 2 * Math.PI;
         return current + diff * t;
     }
 
     function resetPositions(state) {
-        // Instant reset
         hunterGroup.position.x = state.hunter_x;
         hunterGroup.position.z = -state.hunter_z;
         preyGroup.position.x = state.prey_x;
@@ -509,11 +488,9 @@ const CharacterManager = (function () {
         preyTarget.x = state.prey_x;
         preyTarget.z = state.prey_z;
 
-        // Reset buff state
         hunterHasBuff = false;
         preyHasBuff = false;
 
-        // Clear trails
         _clearTrail(hunterTrail);
         _clearTrail(preyTrail);
     }
