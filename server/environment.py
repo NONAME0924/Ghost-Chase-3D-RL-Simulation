@@ -12,8 +12,6 @@ Features:
 
 import numpy as np
 import math
-import gymnasium as gym
-from gymnasium import spaces
 
 # Action definitions: 8 directions + stay
 ACTIONS = {
@@ -73,23 +71,42 @@ class ChaseEnv:
         self.prey_pos = np.zeros(2)
         self.prey_angle = 0.0
         self.steps = 0
-        self.max_steps = 1000
+        self.max_steps = 3000
 
-        # FOV power-up state
-        self.powerup_pos = np.zeros(2)
-        self.powerup_active = False
-        self.powerup_cooldown = 0.0
+        # Point collection system (replace FOV power-up)
+        self.points_pos = [np.zeros(2) for _ in range(3)]
+        self.points_active = [False, False, False]
+        self.points_collected = 0
 
-        # Buff state (per agent)
-        self.hunter_fov_buff = 0.0
-        self.prey_fov_buff = 0.0
-
-        # Obstacles: [x, z, width, depth]
+        # L-shaped obstacles (Each L is two rectangles)
         self.obstacles = [
-            {'x': -5.0, 'z': -5.0, 'w': 2.0, 'd': 2.0},
-            {'x': 5.0, 'z': 5.0, 'w': 3.0, 'd': 3.0},
-            {'x': -6.0, 'z': 4.0, 'w': 1.5, 'd': 4.0},
-            {'x': 4.0, 'z': -6.0, 'w': 4.0, 'd': 1.5},
+            # L-shape 1 (Central-ish)
+            {'x': -4.0, 'z': -4.0, 'w': 3.0, 'd': 1.0},
+            {'x': -5.0, 'z': -3.0, 'w': 1.0, 'd': 3.0},
+            
+            # L-shape 2 (Symmetrical-ish)
+            {'x': 4.0, 'z': 4.0, 'w': 3.0, 'd': 1.0},
+            {'x': 5.0, 'z': 3.0, 'w': 1.0, 'd': 3.0},
+
+            # L-shape 3 (New)
+            {'x': -4.0, 'z': 4.0, 'w': 3.0, 'd': 1.0},
+            {'x': -3.0, 'z': 5.0, 'w': 1.0, 'd': 3.0},
+
+            # L-shape 4 (New)
+            {'x': 4.0, 'z': -4.0, 'w': 3.0, 'd': 1.0},
+            {'x': 3.0, 'z': -5.0, 'w': 1.0, 'd': 3.0},
+
+            # Some straight blocks for variety
+            {'x': -7.0, 'z': 0.0, 'w': 3.0, 'd': 1.0},
+            {'x': 7.0, 'z': 0.0, 'w': 3.0, 'd': 1.0},
+            {'x': 0.0, 'z': -7.0, 'w': 1.0, 'd': 3.0},
+            {'x': 0.0, 'z': 7.0, 'w': 1.0, 'd': 3.0},
+
+            # Scattered small blocks (More cover)
+            {'x': -1.5, 'z': -1.5, 'w': 1.2, 'd': 1.2},
+            {'x': 1.5, 'z': 1.5, 'w': 1.2, 'd': 1.2},
+            {'x': -6.0, 'z': 5.0, 'w': 2.0, 'd': 1.5},
+            {'x': 6.0, 'z': -5.0, 'w': 1.5, 'd': 2.0},
         ]
 
         self.reset()
@@ -100,101 +117,51 @@ class ChaseEnv:
             self.hunter_pos = np.random.uniform(-HALF_ARENA + 1, HALF_ARENA - 1, 2)
             self.prey_pos = np.random.uniform(-HALF_ARENA + 1, HALF_ARENA - 1, 2)
             
-            # Check obstacles for hunter
+            # Check obstacles
             h_in_obs = any(self._is_inside_obstacle(self.hunter_pos, obs) for obs in self.obstacles)
-            # Check obstacles for prey
             p_in_obs = any(self._is_inside_obstacle(self.prey_pos, obs) for obs in self.obstacles)
             
-            if not h_in_obs and not p_in_obs and np.linalg.norm(self.hunter_pos - self.prey_pos) > 5.0:
+            if not h_in_obs and not p_in_obs and np.linalg.norm(self.hunter_pos - self.prey_pos) > 8.0:
                 break
 
         self.hunter_angle = np.random.uniform(-math.pi, math.pi)
         self.prey_angle = np.random.uniform(-math.pi, math.pi)
         self.steps = 0
+        self.points_collected = 0
+        self.steps_since_last_point = 0
 
-        # Spawn items
-        self._spawn_powerup()
-        self.powerup_cooldown = 0.0
-        self.hunter_fov_buff = 0.0
-        self.prey_fov_buff = 0.0
+        # Spawn 3 points
+        for i in range(3):
+            self.points_pos[i] = self._spawn_point_pos()
+            self.points_active[i] = True
 
         return self._get_obs_hunter(), self._get_obs_prey()
 
-    def _is_inside_obstacle(self, pos, obs, padding=0.4):
+    def _is_inside_obstacle(self, pos, obs, padding=0.5):
         """Check if a position is inside an obstacle with optional padding."""
         half_w = obs['w'] / 2 + padding
         half_d = obs['d'] / 2 + padding
         return (obs['x'] - half_w <= pos[0] <= obs['x'] + half_w and
                 obs['z'] - half_d <= pos[1] <= obs['z'] + half_d)
 
-    def _spawn_powerup(self):
-        """Spawn the FOV power-up at a random position away from both agents and obstacles."""
+    def _spawn_point_pos(self):
+        """Find a valid random position for a point."""
         for _ in range(100):
             pos = np.random.uniform(-HALF_ARENA + 2, HALF_ARENA - 2, 2)
-            
-            # Check obstacles
-            if any(self._is_inside_obstacle(pos, obs, padding=0.2) for obs in self.obstacles):
+            if any(self._is_inside_obstacle(pos, obs, padding=0.3) for obs in self.obstacles):
                 continue
-                
-            dist_h = np.linalg.norm(pos - self.hunter_pos)
-            dist_p = np.linalg.norm(pos - self.prey_pos)
-            if dist_h > 3.0 and dist_p > 3.0:
-                self.powerup_pos = pos
-                self.powerup_active = True
-                return
-        self.powerup_pos = np.random.uniform(-HALF_ARENA + 2, HALF_ARENA - 2, 2)
-        self.powerup_active = True
-
-    def _get_effective_fov(self, agent):
-        """Get the effective FOV angle based on buff status."""
-        if agent == 'hunter' and self.hunter_fov_buff > 0:
-            return math.radians(360)
-        elif agent == 'prey' and self.prey_fov_buff > 0:
-            return math.radians(360)
-        return FOV_ANGLE
-
-    def _is_in_fov(self, observer_pos, observer_angle, target_pos, fov_override=None):
-        """Check if target is within the FOV of the observer."""
-        direction = target_pos - observer_pos
-        dist = np.linalg.norm(direction)
-        if dist < 1e-6:
-            return True, 0.0, dist
-
-        angle_to_target = math.atan2(direction[1], direction[0])
-        rel_angle = angle_to_target - observer_angle
-        rel_angle = (rel_angle + math.pi) % (2 * math.pi) - math.pi
-
-        fov = fov_override if fov_override is not None else FOV_ANGLE
-        is_visible = abs(rel_angle) <= fov / 2.0
-        return is_visible, rel_angle, dist
-
-    def _get_item_obs(self, agent_pos, agent_angle, item_pos, item_active):
-        """Get observation components related to an item."""
-        max_dist = math.sqrt(2) * ARENA_SIZE
-
-        if not item_active:
-            return 1.0, 0.0, 0.0  # norm_dist, norm_angle, present
-
-        direction = item_pos - agent_pos
-        dist = np.linalg.norm(direction)
-        norm_dist = dist / max_dist
-
-        angle_to_item = math.atan2(direction[1], direction[0])
-        rel_angle = angle_to_item - agent_angle
-        rel_angle = (rel_angle + math.pi) % (2 * math.pi) - math.pi
-        norm_angle = rel_angle / math.pi
-
-        return norm_dist, norm_angle, 1.0
+            # Also stay away from other points if possible
+            return pos
+        return np.random.uniform(-HALF_ARENA + 2, HALF_ARENA - 2, 2)
 
     def _get_obs_hunter(self):
         """Get observation for the hunter (12 dimensions)."""
-        fov = self._get_effective_fov('hunter')
         visible, rel_angle, dist = self._is_in_fov(
-            self.hunter_pos, self.hunter_angle, self.prey_pos, fov_override=fov
+            self.hunter_pos, self.hunter_angle, self.prey_pos
         )
 
-        max_dist = math.sqrt(2) * ARENA_SIZE
-        norm_dist = dist / max_dist if visible else 1.0
+        max_val = math.sqrt(2) * ARENA_SIZE
+        norm_dist = dist / max_val if visible else 1.0
         norm_angle = rel_angle / math.pi if visible else 0.0
         is_visible = 1.0 if visible else 0.0
 
@@ -209,28 +176,25 @@ class ChaseEnv:
         face_cos = math.cos(self.hunter_angle)
         face_sin = math.sin(self.hunter_angle)
 
-        # FOV power-up observation
-        pu_dist, pu_angle, pu_present = self._get_item_obs(
-            self.hunter_pos, self.hunter_angle, self.powerup_pos, self.powerup_active
-        )
-        has_buff = 1.0 if self.hunter_fov_buff > 0 else 0.0
+        # Observation of nearest active point
+        p_dist, p_angle, p_any = self._get_nearest_point_obs(self.hunter_pos, self.hunter_angle)
+        progress = self.points_collected / 3.0
 
         return np.array([
             norm_dist, norm_angle, is_visible,
             norm_x, norm_z, dist_to_boundary,
             face_cos, face_sin,
-            pu_dist, pu_angle, pu_present, has_buff,
+            p_dist, p_angle, p_any, progress,
         ], dtype=np.float32)
 
     def _get_obs_prey(self):
         """Get observation for the prey (12 dimensions)."""
-        fov = self._get_effective_fov('prey')
         visible, rel_angle, dist = self._is_in_fov(
-            self.prey_pos, self.prey_angle, self.hunter_pos, fov_override=fov
+            self.prey_pos, self.prey_angle, self.hunter_pos
         )
 
-        max_dist = math.sqrt(2) * ARENA_SIZE
-        norm_dist = dist / max_dist if visible else 1.0
+        max_val = math.sqrt(2) * ARENA_SIZE
+        norm_dist = dist / max_val if visible else 1.0
         norm_angle = rel_angle / math.pi if visible else 0.0
         is_visible = 1.0 if visible else 0.0
 
@@ -245,42 +209,78 @@ class ChaseEnv:
         face_cos = math.cos(self.prey_angle)
         face_sin = math.sin(self.prey_angle)
 
-        # FOV power-up observation
-        pu_dist, pu_angle, pu_present = self._get_item_obs(
-            self.prey_pos, self.prey_angle, self.powerup_pos, self.powerup_active
-        )
-        has_buff = 1.0 if self.prey_fov_buff > 0 else 0.0
+        # Observation of nearest active point
+        p_dist, p_angle, p_any = self._get_nearest_point_obs(self.prey_pos, self.prey_angle)
+        progress = self.points_collected / 3.0
 
         return np.array([
             norm_dist, norm_angle, is_visible,
             norm_x, norm_z, dist_to_boundary,
             face_cos, face_sin,
-            pu_dist, pu_angle, pu_present, has_buff,
+            p_dist, p_angle, p_any, progress,
         ], dtype=np.float32)
 
-    def step(self, hunter_action, prey_action):
-        """
-        Execute one step.
+    def _get_nearest_point_obs(self, agent_pos, agent_angle):
+        """Find the nearest active point and return normalized distance and angle."""
+        max_dist = math.sqrt(2) * ARENA_SIZE
+        nearest_dist = float('inf')
+        nearest_idx = -1
 
-        Returns:
-            hunter_obs, prey_obs, hunter_reward, prey_reward, terminated, truncated, info
-        """
+        for i in range(3):
+            if self.points_active[i]:
+                d = np.linalg.norm(self.points_pos[i] - agent_pos)
+                if d < nearest_dist:
+                    nearest_dist = d
+                    nearest_idx = i
+
+        if nearest_idx == -1:
+            return 1.0, 0.0, 0.0
+
+        direction = self.points_pos[nearest_idx] - agent_pos
+        angle_to_point = math.atan2(direction[1], direction[0])
+        rel_angle = angle_to_point - agent_angle
+        rel_angle = (rel_angle + math.pi) % (2 * math.pi) - math.pi
+
+        return nearest_dist / max_dist, rel_angle / math.pi, 1.0
+
+    def _is_in_fov(self, observer_pos, observer_angle, target_pos):
+        """Check if target is within the fixed 120° FOV of the observer."""
+        direction = target_pos - observer_pos
+        dist = np.linalg.norm(direction)
+        if dist < 1e-6:
+            return True, 0.0, dist
+
+        angle_to_target = math.atan2(direction[1], direction[0])
+        rel_angle = angle_to_target - observer_angle
+        rel_angle = (rel_angle + math.pi) % (2 * math.pi) - math.pi
+
+        is_visible = abs(rel_angle) <= FOV_ANGLE / 2.0
+        return is_visible, rel_angle, dist
+
+    def step(self, hunter_action, prey_action):
+        """Execute one step with point collection mechanics."""
         self.steps += 1
+        info = {'captured': False, 'points_win': False}
+
+        # Calculate initial distance to nearest point for "Point Gravity" reward
+        d_p_nearest_old, _, p_any = self._get_nearest_point_obs(self.prey_pos, self.prey_angle)
 
         # --- Move Hunter ---
+        old_h_pos = self.hunter_pos.copy()
         move_dir_h = ACTIONS[hunter_action].copy()
-        if np.linalg.norm(move_dir_h) > 0:
+        is_moving_h = np.linalg.norm(move_dir_h) > 0
+        if is_moving_h:
             new_h_pos = self.hunter_pos + move_dir_h * MOVE_SPEED
-            # Collision check
             if not any(self._is_inside_obstacle(new_h_pos, obs) for obs in self.obstacles):
                 self.hunter_angle = math.atan2(move_dir_h[1], move_dir_h[0])
                 self.hunter_pos = new_h_pos
 
         # --- Move Prey ---
+        old_p_pos = self.prey_pos.copy()
         move_dir_p = ACTIONS[prey_action].copy()
-        if np.linalg.norm(move_dir_p) > 0:
+        is_moving_p = np.linalg.norm(move_dir_p) > 0
+        if is_moving_p:
             new_p_pos = self.prey_pos + move_dir_p * MOVE_SPEED
-            # Collision check
             if not any(self._is_inside_obstacle(new_p_pos, obs) for obs in self.obstacles):
                 self.prey_angle = math.atan2(move_dir_p[1], move_dir_p[0])
                 self.prey_pos = new_p_pos
@@ -289,97 +289,94 @@ class ChaseEnv:
         self.hunter_pos = np.clip(self.hunter_pos, -HALF_ARENA, HALF_ARENA)
         self.prey_pos = np.clip(self.prey_pos, -HALF_ARENA, HALF_ARENA)
 
-        # --- FOV Power-up pickup ---
-        powerup_picked_by = None
-        if self.powerup_active:
-            dist_h_pu = np.linalg.norm(self.hunter_pos - self.powerup_pos)
-            dist_p_pu = np.linalg.norm(self.prey_pos - self.powerup_pos)
+        # --- Point collection ---
+        point_collected_this_step = False
+        self.steps_since_last_point += 1
+        
+        for i in range(3):
+            if self.points_active[i]:
+                dist_p_point = np.linalg.norm(self.prey_pos - self.points_pos[i])
+                if dist_p_point < 1.0:
+                    self.points_active[i] = False
+                    self.points_collected += 1
+                    self.steps_since_last_point = 0
+                    point_collected_this_step = True
 
-            if dist_h_pu < POWERUP_PICKUP_DIST:
-                self.hunter_fov_buff = POWERUP_BUFF_DURATION * STEPS_PER_SECOND
-                self.powerup_active = False
-                self.powerup_cooldown = POWERUP_RESPAWN_COOLDOWN * STEPS_PER_SECOND
-                powerup_picked_by = 'hunter'
-            elif dist_p_pu < POWERUP_PICKUP_DIST:
-                self.prey_fov_buff = POWERUP_BUFF_DURATION * STEPS_PER_SECOND
-                self.powerup_active = False
-                self.powerup_cooldown = POWERUP_RESPAWN_COOLDOWN * STEPS_PER_SECOND
-                powerup_picked_by = 'prey'
-
-        # --- Buff countdown ---
-        if self.hunter_fov_buff > 0:
-            self.hunter_fov_buff -= 1
-        if self.prey_fov_buff > 0:
-            self.prey_fov_buff -= 1
-
-        # --- Item respawn ---
-        if not self.powerup_active and self.powerup_cooldown > 0:
-            self.powerup_cooldown -= 1
-            if self.powerup_cooldown <= 0:
-                self._spawn_powerup()
-
-        # --- Determine current roles ---
+        # --- Win Conditions ---
         dist = np.linalg.norm(self.hunter_pos - self.prey_pos)
         captured = bool(dist < CAPTURE_DIST)
+        points_win = bool(self.points_collected >= 3)
 
         # --- Rewards ---
-        h_fov = self._get_effective_fov('hunter')
-        p_fov = self._get_effective_fov('prey')
-        h_vis, _, _ = self._is_in_fov(self.hunter_pos, self.hunter_angle, self.prey_pos, fov_override=h_fov)
-        p_vis, _, _ = self._is_in_fov(self.prey_pos, self.prey_angle, self.hunter_pos, fov_override=p_fov)
+        h_vis, _, _ = self._is_in_fov(self.hunter_pos, self.hunter_angle, self.prey_pos)
+        p_vis, _, _ = self._is_in_fov(self.prey_pos, self.prey_angle, self.hunter_pos)
 
-        # Normal roles: hunter chases, prey flees
-        if h_vis:
-            hunter_reward = -dist * 0.01
-        else:
-            hunter_reward = -0.05
+        # Hunter Reward: Minimize distance, stay visible
+        hunter_reward = -dist * 0.02
+        if h_vis: hunter_reward += 0.5
+        
+        # Prey Reward: More balanced (not too punishing)
+        prey_reward = dist * 0.005
+        if not p_vis: prey_reward += 0.1
+        else: prey_reward -= 0.1  # Further reduced penalty (was 0.4) to encourage exploration
 
-        # Prey: Penalized for seeing the ghost (exposed), rewarded for hiding (safe)
-        if p_vis:
-            prey_reward = -0.5  # Penality for seeing the danger
-        else:
-            prey_reward = 0.2   # Reward for staying out of sight (hiding)
+        # Point Gravity Reward: Encourage moving towards points
+        if p_any > 0:
+            d_p_nearest_new, _, _ = self._get_nearest_point_obs(self.prey_pos, self.prey_angle)
+            if d_p_nearest_new < d_p_nearest_old:
+                prey_reward += 0.1  # Reward for getting closer to points
+            elif d_p_nearest_new > d_p_nearest_old:
+                prey_reward -= 0.05 # Small penalty for moving away
+        
+        if point_collected_this_step:
+            # First point bonus (+100), others (+50)
+            if self.points_collected == 1:
+                prey_reward += 100.0
+            else:
+                prey_reward += 50.0
 
-        # Still keep distance reward for Prey to encourage running far
-        prey_reward += dist * 0.01
+        # Softened inactivity penalty: Enough to discourage camping without being crushing
+        if self.steps_since_last_point > 400:
+            prey_reward -= 0.15
+
+        # Corner Dead-Zone Penalty (2x2 units in each corner)
+        # $|x| > 8$ and $|z| > 8$ for a 20x20 arena (HALF_ARENA = 10)
+        for pos, role in [(self.hunter_pos, 'h'), (self.prey_pos, 'p')]:
+            if abs(pos[0]) > 8.0 and abs(pos[1]) > 8.0:
+                if role == 'h': hunter_reward -= 2.0
+                else: prey_reward -= 5.0 # Heavy penalty for Prey
+
+        # Collision Penalty: If agent tried to move but failed (hit wall/obstacle)
+        if is_moving_h and np.linalg.norm(self.hunter_pos - old_h_pos) < 0.01:
+            hunter_reward -= 1.0
+        if is_moving_p and np.linalg.norm(self.prey_pos - old_p_pos) < 0.01:
+            prey_reward -= 2.0
 
         if captured:
-            hunter_reward += 10.0
-            prey_reward -= 10.0
+            hunter_reward += 50.0
+            prey_reward -= 50.0
+            info['captured'] = True
+        elif points_win:
+            hunter_reward -= 50.0
+            prey_reward += 100.0
+            info['points_win'] = True
 
-        # FOV Power-up pickup reward
-        if powerup_picked_by == 'hunter':
-            hunter_reward += 2.0
-        elif powerup_picked_by == 'prey':
-            prey_reward += 2.0
+        # Boundary penalty (Increased weight to -2.0)
+        for pos, role in [(self.hunter_pos, 'h'), (self.prey_pos, 'p')]:
+            w_dist = min(HALF_ARENA - abs(pos[0]), HALF_ARENA - abs(pos[1]))
+            if w_dist < 1.0:
+                penalty = (1.0 - w_dist) * 2.0 # Increased from 0.5
+                if role == 'h': hunter_reward -= penalty
+                else: prey_reward -= penalty
 
-        # Observation reward (Prey reward moved to hiding logic above)
-        if h_vis:
-            hunter_reward += 0.5
-
-        # Boundary penalty
-        for pos, prefix in [(self.hunter_pos, 'hunter'), (self.prey_pos, 'prey')]:
-            wall_dist = min(
-                HALF_ARENA - abs(pos[0]),
-                HALF_ARENA - abs(pos[1])
-            )
-            if wall_dist < 1.0:
-                penalty = (1.0 - wall_dist) * 0.5
-                if prefix == 'hunter':
-                    hunter_reward -= penalty
-                else:
-                    prey_reward -= penalty
-
-        # Timeout
-        terminated = bool(captured)
+        terminated = bool(captured or points_win)
         truncated = bool(self.steps >= self.max_steps)
 
-        info = {
-            'captured': captured,
+        info.update({
             'steps': int(self.steps),
             'distance': float(dist),
-            'powerup_picked_by': powerup_picked_by,
-        }
+            'points_collected': self.points_collected
+        })
 
         return (
             self._get_obs_hunter(),
@@ -400,57 +397,9 @@ class ChaseEnv:
             'prey_x': float(self.prey_pos[0]),
             'prey_z': float(self.prey_pos[1]),
             'prey_angle': float(self.prey_angle),
-            # FOV Power-up state
-            'powerup_x': float(self.powerup_pos[0]),
-            'powerup_z': float(self.powerup_pos[1]),
-            'powerup_active': self.powerup_active,
-            'hunter_fov_buff': self.hunter_fov_buff > 0,
-            'prey_fov_buff': self.prey_fov_buff > 0,
+            'points_pos': [[float(p[0]), float(p[1])] for p in self.points_pos],
+            'points_active': self.points_active,
+            'points_collected': self.points_collected,
+            'steps': int(self.steps),
             'obstacles': self.obstacles,
         }
-
-
-class HunterEnv(gym.Env):
-    """Gym-compatible wrapper for the Hunter agent."""
-    def __init__(self, base_env, prey_policy_fn=None):
-        super().__init__()
-        self.base_env = base_env
-        self.prey_policy_fn = prey_policy_fn
-        self.action_space = spaces.Discrete(NUM_ACTIONS)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(12,), dtype=np.float32)
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        obs_h, _ = self.base_env.reset()
-        return obs_h, {}
-
-    def step(self, action):
-        # We need an action for the prey. If no policy provided, stay still.
-        prey_obs = self.base_env._get_obs_prey()
-        prey_action = self.prey_policy_fn(prey_obs) if self.prey_policy_fn else 0
-        
-        obs_h, _, reward_h, _, terminated, truncated, info = self.base_env.step(action, prey_action)
-        return obs_h, reward_h, terminated, truncated, info
-
-
-class PreyEnv(gym.Env):
-    """Gym-compatible wrapper for the Prey agent."""
-    def __init__(self, base_env, hunter_policy_fn=None):
-        super().__init__()
-        self.base_env = base_env
-        self.hunter_policy_fn = hunter_policy_fn
-        self.action_space = spaces.Discrete(NUM_ACTIONS)
-        self.observation_space = spaces.Box(low=0, high=1, shape=(12,), dtype=np.float32)
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        _, obs_p = self.base_env.reset()
-        return obs_p, {}
-
-    def step(self, action):
-        # We need an action for the hunter.
-        hunter_obs = self.base_env._get_obs_hunter()
-        hunter_action = self.hunter_policy_fn(hunter_obs) if self.hunter_policy_fn else 0
-        
-        _, obs_p, _, reward_p, terminated, truncated, info = self.base_env.step(hunter_action, action)
-        return obs_p, reward_p, terminated, truncated, info

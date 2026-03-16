@@ -46,6 +46,10 @@
                     <div class="stat-label">DISTANCE</div>
                     <div class="stat-value" id="distance-value">—</div>
                 </div>
+                <div class="stat-item" id="stat-points">
+                    <div class="stat-label">POINTS</div>
+                    <div class="stat-value" id="points-count">0 / 3</div>
+                </div>
             </div>
         </div>
 
@@ -80,14 +84,6 @@
                     <div class="train-stat">
                         <span class="train-stat-label">Prey Reward</span>
                         <span class="train-stat-value prey-color" id="train-reward-p">0.00</span>
-                    </div>
-                    <div class="train-stat">
-                        <span class="train-stat-label">Hunter Loss</span>
-                        <span class="train-stat-value" id="train-loss-h">0.0000</span>
-                    </div>
-                    <div class="train-stat">
-                        <span class="train-stat-label">Prey Loss</span>
-                        <span class="train-stat-value" id="train-loss-p">0.0000</span>
                     </div>
                 </div>
 
@@ -147,6 +143,12 @@
     <div id="captured-popup" class="hidden">
         <div class="captured-text">CAPTURED!</div>
         <div class="captured-sub">Resetting in 1s...</div>
+    </div>
+
+    <!-- Prey Win Popup -->
+    <div id="prey-win-popup" class="hidden">
+        <div class="prey-win-text">🏆 VICTORY!</div>
+        <div class="prey-win-sub">All points collected!</div>
     </div>
 
     <!-- Three.js Canvas Container -->

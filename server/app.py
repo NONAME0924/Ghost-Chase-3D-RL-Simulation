@@ -11,7 +11,6 @@ Modes:
 """
 
 import os
-import sys
 import time
 import math
 import numpy as np
@@ -170,10 +169,15 @@ def training_loop():
 
         # --- Episode done ---
         captured = info.get("captured", False)
+        points_win = info.get("points_win", False)
+
         if captured:
             train_stats["total_captures"] += 1
             socketio.emit("captured", {"episode": episode})
-            # Brief pause on capture for visual feedback
+            if train_settings["speed"] <= 2:
+                socketio.sleep(0.5)
+        elif points_win:
+            socketio.emit("prey_win", {"episode": episode})
             if train_settings["speed"] <= 2:
                 socketio.sleep(0.5)
 
@@ -281,6 +285,9 @@ def demo_loop():
 
         if info.get("captured", False):
             socketio.emit("captured", {"episode": episode_count})
+            socketio.sleep(1.0)
+        elif info.get("points_win", False):
+            socketio.emit("prey_win", {"episode": episode_count})
             socketio.sleep(1.0)
 
 

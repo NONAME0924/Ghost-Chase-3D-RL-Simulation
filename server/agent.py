@@ -5,11 +5,9 @@ Supports manual training loops while keeping SB3's internal state consistent.
 
 import os
 import numpy as np
-import torch
 import gymnasium as gym
 from stable_baselines3 import DQN
 from stable_baselines3.common.logger import configure
-from stable_baselines3.common.utils import get_linear_fn
 
 class SB3Agent:
     """

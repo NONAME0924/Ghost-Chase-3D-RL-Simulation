@@ -18,31 +18,30 @@ const CharacterManager = (function () {
     const HUNTER_EMISSIVE = 0xff4400;
     const PREY_COLOR = 0x4fc3f7;
     const PREY_EMISSIVE = 0x0088cc;
-    const POWERUP_COLOR = 0xffdd00;
-    const POWERUP_EMISSIVE = 0xffaa00;
+    const POINT_COLOR = 0xffdd00;
+    const POINT_EMISSIVE = 0xffaa00;
 
     // Character objects
     let hunterGroup, preyGroup;
     let hunterMesh, preyMesh;
     let hunterFov, preyFov;
-    let hunterFovBuffed, preyFovBuffed; // 360° FOV cones
     let hunterLight, preyLight;
     let hunterLabel, preyLabel;
     let hunterTrail = [], preyTrail = [];
 
-    // Power-up objects
-    let powerupGroup;
-    let powerupMesh;
-    let powerupLight;
+    // Points objects (3 dots to collect)
+    let pointsGroups = [];
 
     // Target state (for interpolation)
     let hunterTarget = { x: 0, z: 0, angle: 0 };
     let preyTarget = { x: 0, z: 0, angle: 0 };
 
-    // Power-up state
-    let powerupState = { x: 0, z: 0, active: false };
-    let hunterHasBuff = false;
-    let preyHasBuff = false;
+    // Points state
+    let pointsState = [
+        { x: 0, z: 0, active: false },
+        { x: 0, z: 0, active: false },
+        { x: 0, z: 0, active: false }
+    ];
 
     // Display toggling
     let showFov = true;
@@ -54,7 +53,7 @@ const CharacterManager = (function () {
         scene = threeScene;
         _createHunter();
         _createPrey();
-        _createPowerup();
+        _createPoints(3);
     }
 
     function _createCube(color, emissive) {
@@ -104,36 +103,6 @@ const CharacterManager = (function () {
         return mesh;
     }
 
-    function _createFovCircle(color) {
-        // Create a full 360-degree circle for buffed FOV
-        const segments = 48;
-        const shape = new THREE.Shape();
-
-        for (let i = 0; i <= segments; i++) {
-            const angle = (2 * Math.PI * i) / segments;
-            const x = Math.sin(angle) * FOV_RADIUS;
-            const y = Math.cos(angle) * FOV_RADIUS;
-            if (i === 0) shape.moveTo(x, y);
-            else shape.lineTo(x, y);
-        }
-
-        const geo = new THREE.ShapeGeometry(shape);
-        const mat = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 0.15,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-        });
-
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.rotation.x = Math.PI / 2;
-        mesh.position.y = 0.05;
-        mesh.visible = false; // Hidden by default
-
-        return mesh;
-    }
-
     function _createLabel(text, color) {
         const canvas = document.createElement('canvas');
         canvas.width = 256;
@@ -179,10 +148,6 @@ const CharacterManager = (function () {
         hunterFov = _createFovCone(HUNTER_COLOR);
         hunterGroup.add(hunterFov);
 
-        // FOV circle (buffed 360°)
-        hunterFovBuffed = _createFovCircle(HUNTER_COLOR);
-        hunterGroup.add(hunterFovBuffed);
-
         // Point light glow
         hunterLight = new THREE.PointLight(HUNTER_COLOR, 0.6, 8);
         hunterLight.position.set(0, 1.5, 0);
@@ -212,10 +177,6 @@ const CharacterManager = (function () {
         preyFov = _createFovCone(PREY_COLOR);
         preyGroup.add(preyFov);
 
-        // FOV circle (buffed 360°)
-        preyFovBuffed = _createFovCircle(PREY_COLOR);
-        preyGroup.add(preyFovBuffed);
-
         // Point light glow
         preyLight = new THREE.PointLight(PREY_COLOR, 0.6, 8);
         preyLight.position.set(0, 1.5, 0);
@@ -234,53 +195,49 @@ const CharacterManager = (function () {
         scene.add(preyGroup);
     }
 
-    function _createPowerup() {
-        powerupGroup = new THREE.Group();
+    function _createPoints(count) {
+        for (let i = 0; i < count; i++) {
+            const group = new THREE.Group();
 
-        // Octahedron (diamond shape)
-        const geo = new THREE.OctahedronGeometry(0.4, 0);
-        const mat = new THREE.MeshStandardMaterial({
-            color: POWERUP_COLOR,
-            emissive: POWERUP_EMISSIVE,
-            emissiveIntensity: 0.8,
-            roughness: 0.2,
-            metalness: 0.7,
-            transparent: true,
-            opacity: 0.9,
-        });
-        powerupMesh = new THREE.Mesh(geo, mat);
-        powerupMesh.position.y = 0.8;
-        powerupMesh.castShadow = true;
-        powerupGroup.add(powerupMesh);
+            // Octahedron (diamond shape)
+            const geo = new THREE.OctahedronGeometry(0.3, 0);
+            const mat = new THREE.MeshStandardMaterial({
+                color: POINT_COLOR,
+                emissive: POINT_EMISSIVE,
+                emissiveIntensity: 0.8,
+                roughness: 0.2,
+                metalness: 0.7,
+                transparent: true,
+                opacity: 0.9,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.y = 0.6;
+            mesh.castShadow = true;
+            group.add(mesh);
 
-        // Glow ring on ground
-        const ringGeo = new THREE.RingGeometry(0.5, 0.7, 32);
-        const ringMat = new THREE.MeshBasicMaterial({
-            color: POWERUP_COLOR,
-            transparent: true,
-            opacity: 0.3,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-        });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.02;
-        powerupGroup.add(ring);
+            // Glow ring on ground
+            const ringGeo = new THREE.RingGeometry(0.4, 0.5, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: POINT_COLOR,
+                transparent: true,
+                opacity: 0.3,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+            });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = 0.02;
+            group.add(ring);
 
-        // Point light
-        powerupLight = new THREE.PointLight(POWERUP_COLOR, 0.8, 6);
-        powerupLight.position.set(0, 1.2, 0);
-        powerupGroup.add(powerupLight);
+            // Point light
+            const light = new THREE.PointLight(POINT_COLOR, 0.6, 4);
+            light.position.set(0, 0.8, 0);
+            group.add(light);
 
-        // Eye icon above (to indicate vision power-up)
-        const eyeGeo = new THREE.SphereGeometry(0.12, 8, 8);
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        const eye = new THREE.Mesh(eyeGeo, eyeMat);
-        eye.position.set(0, 1.4, 0);
-        powerupGroup.add(eye);
-
-        powerupGroup.visible = false;
-        scene.add(powerupGroup);
+            group.visible = false;
+            scene.add(group);
+            pointsGroups.push(group);
+        }
     }
 
     function _addEyes(group) {
@@ -354,18 +311,15 @@ const CharacterManager = (function () {
         preyTarget.z = state.prey_z;
         preyTarget.angle = state.prey_angle;
 
-        // Power-up state
-        if (state.powerup_active !== undefined) {
-            powerupState.x = state.powerup_x;
-            powerupState.z = state.powerup_z;
-            powerupState.active = state.powerup_active;
-        }
-
-        if (state.hunter_fov_buff !== undefined) {
-            hunterHasBuff = state.hunter_fov_buff;
-        }
-        if (state.prey_fov_buff !== undefined) {
-            preyHasBuff = state.prey_fov_buff;
+        // Points state
+        if (state.points_pos) {
+            for (let i = 0; i < 3; i++) {
+                pointsState[i] = {
+                    x: state.points_pos[i][0],
+                    z: state.points_pos[i][1],
+                    active: state.points_active[i]
+                };
+            }
         }
     }
 
@@ -385,27 +339,22 @@ const CharacterManager = (function () {
         preyGroup.rotation.y = _lerpAngle(preyGroup.rotation.y, preyTargetRotY, LERP_SPEED);
 
         // FOV visibility
-        if (showFov) {
-            hunterFov.visible = !hunterHasBuff;
-            hunterFovBuffed.visible = hunterHasBuff;
-            preyFov.visible = !preyHasBuff;
-            preyFovBuffed.visible = preyHasBuff;
-        } else {
-            hunterFov.visible = false;
-            hunterFovBuffed.visible = false;
-            preyFov.visible = false;
-            preyFovBuffed.visible = false;
-        }
+        hunterFov.visible = showFov;
+        preyFov.visible = showFov;
 
-        // Power-up item
-        if (powerupState.active) {
-            powerupGroup.visible = true;
-            powerupGroup.position.x = powerupState.x;
-            powerupGroup.position.z = -powerupState.z;
-            powerupMesh.rotation.y += 0.03;
-            powerupMesh.position.y = 0.8 + Math.sin(Date.now() * 0.003) * 0.15;
-        } else {
-            powerupGroup.visible = false;
+        // Update points
+        for (let i = 0; i < pointsGroups.length; i++) {
+            const group = pointsGroups[i];
+            const pState = pointsState[i];
+            if (pState.active) {
+                group.visible = true;
+                group.position.x = pState.x;
+                group.position.z = -pState.z;
+                group.children[0].rotation.y += 0.03;
+                group.children[0].position.y = 0.6 + Math.sin(Date.now() * 0.003 + i) * 0.1;
+            } else {
+                group.visible = false;
+            }
         }
 
         // Trail dots
@@ -422,8 +371,8 @@ const CharacterManager = (function () {
 
         // Pulse glow effect
         const pulse = 0.4 + Math.sin(Date.now() * 0.003) * 0.15;
-        hunterMesh.material.emissiveIntensity = hunterHasBuff ? 0.8 : pulse;
-        preyMesh.material.emissiveIntensity = preyHasBuff ? 0.8 : pulse;
+        hunterMesh.material.emissiveIntensity = pulse;
+        preyMesh.material.emissiveIntensity = pulse;
     }
 
     function _updateLabel(sprite, text, color) {
@@ -487,9 +436,6 @@ const CharacterManager = (function () {
         hunterTarget.z = state.hunter_z;
         preyTarget.x = state.prey_x;
         preyTarget.z = state.prey_z;
-
-        hunterHasBuff = false;
-        preyHasBuff = false;
 
         _clearTrail(hunterTrail);
         _clearTrail(preyTrail);

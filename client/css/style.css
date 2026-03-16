@@ -577,6 +577,51 @@ body {
     to { filter: drop-shadow(0 0 40px var(--color-hunter-glow)); }
 }
 
+/* === Prey Win Popup === */
+#prey-win-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    text-align: center;
+    pointer-events: none;
+}
+
+#prey-win-popup.hidden {
+    display: none;
+}
+
+#prey-win-popup.visible {
+    display: block;
+    animation: captured-enter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.prey-win-text {
+    font-size: 4rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    background: linear-gradient(135deg, #FFD700, var(--color-prey), #FFD700);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    filter: drop-shadow(0 0 30px rgba(79, 195, 247, 0.5));
+    animation: victory-glow 1s ease-in-out infinite alternate;
+}
+
+.prey-win-sub {
+    font-size: 1rem;
+    color: var(--color-text-dim);
+    margin-top: 10px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+}
+
+@keyframes victory-glow {
+    from { filter: drop-shadow(0 0 20px rgba(79, 195, 247, 0.4)); }
+    to { filter: drop-shadow(0 0 45px rgba(255, 215, 0, 0.6)); }
+}
+
 /* === Responsive === */
 @media (max-width: 768px) {
     .hud-top {

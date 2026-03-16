@@ -13,6 +13,7 @@
     const loadingScreen = document.getElementById('loading-screen');
     const loaderStatus = document.getElementById('loader-status');
     const capturedPopup = document.getElementById('captured-popup');
+    const preyWinPopup = document.getElementById('prey-win-popup');
     const episodeEl = document.getElementById('episode-count');
     const captureEl = document.getElementById('capture-count');
     const stepEl = document.getElementById('step-count');
@@ -32,8 +33,6 @@
     const trainCapRate = document.getElementById('train-cap-rate');
     const trainRewardH = document.getElementById('train-reward-h');
     const trainRewardP = document.getElementById('train-reward-p');
-    const trainLossH = document.getElementById('train-loss-h');
-    const trainLossP = document.getElementById('train-loss-p');
     const trainChart = document.getElementById('train-chart');
     const speedButtons = document.querySelectorAll('.speed-btn');
 
@@ -94,12 +93,19 @@
         });
 
         NetworkManager.on('gameState', (state) => {
-            stepCount++;
+            stepCount = state.steps !== undefined ? state.steps : stepCount + 1;
             CharacterManager.setState(state);
 
             // Update HUD
             episodeEl.textContent = state.episode || 0;
             stepEl.textContent = stepCount;
+            
+            if (state.points_collected !== undefined) {
+                document.getElementById('points-count').innerText = `${state.points_collected} / 3`;
+            }
+            
+            const dist = CharacterManager.getDistance();
+            distanceEl.textContent = dist.toFixed(1);
         });
 
         NetworkManager.on('captured', (data) => {
@@ -116,11 +122,25 @@
             }, 1200);
         });
 
+        NetworkManager.on('prey_win', (data) => {
+            preyWinPopup.classList.remove('hidden');
+            preyWinPopup.classList.add('visible');
+
+            setTimeout(() => {
+                preyWinPopup.classList.remove('visible');
+                preyWinPopup.classList.add('hidden');
+            }, 1500);
+        });
+
         NetworkManager.on('gameReset', (state) => {
             stepCount = 0;
             CharacterManager.resetPositions(state);
             SceneManager.setObstacles(state.obstacles);
             episodeEl.textContent = state.episode || 0;
+            
+            if (state.points_collected !== undefined) {
+                document.getElementById('points-count').innerText = `${state.points_collected} / 3`;
+            }
         });
 
         // === Training Events ===
@@ -148,8 +168,6 @@
         trainCapRate.textContent = data.capture_rate + '%';
         trainRewardH.textContent = data.avg_reward_h.toFixed(2);
         trainRewardP.textContent = data.avg_reward_p.toFixed(2);
-        trainLossH.textContent = data.loss_h.toFixed(4);
-        trainLossP.textContent = data.loss_p.toFixed(4);
 
         // Update capture count from server
         captureEl.textContent = data.total_captures;
