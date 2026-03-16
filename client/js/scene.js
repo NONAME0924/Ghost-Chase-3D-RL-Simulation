@@ -10,6 +10,8 @@ const SceneManager = (function () {
 
     let scene, camera, renderer, controls;
     let gridFloor, boundaryGroup;
+    let obstacleMeshes = [];
+    let obstaclesCreated = false;
 
     function init(container) {
         // Scene
@@ -156,6 +158,7 @@ const SceneManager = (function () {
             const mesh = new THREE.Mesh(geo, wallMat);
             mesh.position.set(...data.pos);
             boundaryGroup.add(mesh);
+            obstacleMeshes.push(mesh);
         });
 
         // Corner posts
@@ -208,7 +211,8 @@ const SceneManager = (function () {
     }
 
     function setObstacles(obstacles) {
-        if (!obstacles || this.obstaclesCreated) return;
+        if (!obstacles || obstaclesCreated) return;
+        obstaclesCreated = true;
 
         const wallMat = new THREE.MeshStandardMaterial({
             color: 0x4a4a6a,
@@ -222,10 +226,10 @@ const SceneManager = (function () {
             mesh.position.set(obs.x, 0.6, -obs.z);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
+            mesh.name = "obstacle";
             scene.add(mesh);
+            obstacleMeshes.push(mesh);
         });
-
-        this.obstaclesCreated = true;
     }
 
     function render() {
@@ -235,6 +239,7 @@ const SceneManager = (function () {
 
     function getScene() { return scene; }
     function getCamera() { return camera; }
+    function getObstacles() { return obstacleMeshes; }
 
-    return { init, render, getScene, getCamera, setObstacles, ARENA_SIZE, HALF };
+    return { init, render, getScene, getCamera, setObstacles, getObstacles, ARENA_SIZE, HALF };
 })();

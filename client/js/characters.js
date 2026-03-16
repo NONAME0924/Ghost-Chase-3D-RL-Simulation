@@ -72,34 +72,44 @@ const CharacterManager = (function () {
     }
 
     function _createFovCone(color) {
-        // Create a 120-degree cone/sector shape
         const segments = 32;
+        const geo = new THREE.BufferGeometry();
+        // Initialize vertices with FOV_RADIUS to be visible from frame 1
+        const vertices = new Float32Array((segments + 2) * 3);
         const halfAngle = FOV_ANGLE / 2;
-
-        const shape = new THREE.Shape();
-        shape.moveTo(0, 0);
-
+        
+        // Point 0: Center
+        vertices[0] = 0; vertices[1] = 0; vertices[2] = 0;
+        // Points 1..segments+1: Perimeter
         for (let i = 0; i <= segments; i++) {
             const angle = -halfAngle + (FOV_ANGLE * i) / segments;
-            const x = Math.sin(angle) * FOV_RADIUS;
-            const y = Math.cos(angle) * FOV_RADIUS;
-            shape.lineTo(x, y);
+            const idx = (i + 1) * 3;
+            vertices[idx] = Math.sin(angle) * FOV_RADIUS;
+            vertices[idx + 1] = Math.cos(angle) * FOV_RADIUS;
+            vertices[idx + 2] = 0;
         }
-        shape.lineTo(0, 0);
 
-        const geo = new THREE.ShapeGeometry(shape);
+        const indices = [];
+        for (let i = 1; i <= segments; i++) {
+            indices.push(0, i, i + 1);
+        }
+        
+        geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3).setUsage(THREE.DynamicDrawUsage));
+        geo.setIndex(indices);
+
         const mat = new THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
-            opacity: 0.1,
+            opacity: 0.35, 
             side: THREE.DoubleSide,
             depthWrite: false,
         });
 
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.rotation.x = Math.PI / 2;
-        mesh.position.y = 0.05;
-
+        mesh.rotation.x = Math.PI / 2; // Fixed: Geometry +Y (points) now maps to Mesh +Z (forward)
+        mesh.position.y = 0.1; // Elevate slightly to avoid floor fighting
+        mesh.renderOrder = 10;
+        mesh.frustumCulled = false;
         return mesh;
     }
 
@@ -373,6 +383,56 @@ const CharacterManager = (function () {
         const pulse = 0.4 + Math.sin(Date.now() * 0.003) * 0.15;
         hunterMesh.material.emissiveIntensity = pulse;
         preyMesh.material.emissiveIntensity = pulse;
+
+        // Update Dynamic FOVs (with existence check)
+        if (showFov) {
+            if (hunterFov) _updateFovMesh(hunterFov, FOV_ANGLE, 32);
+            if (preyFov) _updateFovMesh(preyFov, FOV_ANGLE, 32);
+        }
+    }
+
+    const raycaster = new THREE.Raycaster();
+    const tempOrigin = new THREE.Vector3();
+
+    function _updateFovMesh(mesh, fov, segments) {
+        if (!mesh || !mesh.visible || !mesh.parent) return;
+
+        try {
+            const attr = mesh.geometry.attributes.position;
+            const obstacles = SceneManager.getObstacles();
+            const halfFov = fov / 2;
+
+            mesh.parent.updateMatrixWorld();
+            mesh.parent.getWorldPosition(tempOrigin);
+            tempOrigin.y = 0.5;
+
+            // Update Center
+            attr.setXYZ(0, 0, 0, 0);
+
+            for (let i = 0; i <= segments; i++) {
+                const relAngle = -halfFov + (fov * i) / segments;
+                const localDir = new THREE.Vector3(Math.sin(relAngle), 0, Math.cos(relAngle));
+                const worldDir = localDir.applyQuaternion(mesh.parent.quaternion).normalize();
+
+                raycaster.set(tempOrigin, worldDir);
+                let dist = FOV_RADIUS;
+
+                if (obstacles && obstacles.length > 0) {
+                    const intersects = raycaster.intersectObjects(obstacles, true); // Recursive search
+                    if (intersects.length > 0 && intersects[0].distance < FOV_RADIUS) {
+                        dist = intersects[0].distance;
+                    }
+                }
+
+                // Map results back to local triangle fan
+                attr.setXYZ(i + 1, Math.sin(relAngle) * dist, Math.cos(relAngle) * dist, 0);
+            }
+
+            attr.needsUpdate = true;
+            mesh.geometry.computeBoundingSphere();
+        } catch (e) {
+            // Silently skip frames if state is inconsistent
+        }
     }
 
     function _updateLabel(sprite, text, color) {

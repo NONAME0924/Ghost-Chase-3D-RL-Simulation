@@ -243,8 +243,8 @@ class ChaseEnv:
 
         return nearest_dist / max_dist, rel_angle / math.pi, 1.0
 
-    def _is_in_fov(self, observer_pos, observer_angle, target_pos):
-        """Check if target is within the fixed 120° FOV of the observer."""
+    def _is_in_fov(self, observer_pos, observer_angle, target_pos, fov_override=None):
+        """Check if target is within the FOV of the observer, considering walls."""
         direction = target_pos - observer_pos
         dist = np.linalg.norm(direction)
         if dist < 1e-6:
@@ -254,8 +254,55 @@ class ChaseEnv:
         rel_angle = angle_to_target - observer_angle
         rel_angle = (rel_angle + math.pi) % (2 * math.pi) - math.pi
 
-        is_visible = abs(rel_angle) <= FOV_ANGLE / 2.0
-        return is_visible, rel_angle, dist
+        fov = fov_override if fov_override is not None else FOV_ANGLE
+        is_in_angle = abs(rel_angle) <= fov / 2.0
+        
+        if not is_in_angle:
+            return False, rel_angle, dist
+            
+        # Line of sight check: is any wall blocking the path?
+        if self._is_line_blocked(observer_pos, target_pos):
+            return False, rel_angle, dist
+
+        return True, rel_angle, dist
+
+    def _is_line_blocked(self, p1, p2):
+        """Check if the line segment from p1 to p2 intersects any obstacle."""
+        for obs in self.obstacles:
+            half_w = obs['w'] / 2.0
+            half_d = obs['d'] / 2.0
+            rect_min = np.array([obs['x'] - half_w, obs['z'] - half_d])
+            rect_max = np.array([obs['x'] + half_w, obs['z'] + half_d])
+            
+            if self._line_intersects_rect(p1, p2, rect_min, rect_max):
+                return True
+        return False
+
+    def _line_intersects_rect(self, p1, p2, r_min, r_max):
+        """Liang-Barsky line segment intersection with AABB."""
+        dx = p2[0] - p1[0]
+        dz = p2[1] - p1[1]
+        
+        p = [-dx, dx, -dz, dz]
+        q = [p1[0] - r_min[0], r_max[0] - p1[0], p1[1] - r_min[1], r_max[1] - p1[1]]
+        
+        u1 = 0.0
+        u2 = 1.0
+        
+        for i in range(4):
+            if p[i] == 0:
+                if q[i] < 0:
+                    return False
+            else:
+                t = q[i] / p[i]
+                if p[i] < 0:
+                    if t > u2: return False
+                    if t > u1: u1 = t
+                else:
+                    if t < u1: return False
+                    if t < u2: u2 = t
+                    
+        return u1 <= u2
 
     def step(self, hunter_action, prey_action):
         """Execute one step with point collection mechanics."""
@@ -327,6 +374,13 @@ class ChaseEnv:
                 prey_reward += 0.1  # Reward for getting closer to points
             elif d_p_nearest_new > d_p_nearest_old:
                 prey_reward -= 0.05 # Small penalty for moving away
+            
+            # Additional reward for seeing points (Visibility reward)
+            for i in range(3):
+                if self.points_active[i]:
+                    pt_vis, _, _ = self._is_in_fov(self.prey_pos, self.prey_angle, self.points_pos[i])
+                    if pt_vis:
+                        prey_reward += 0.005  # Further reduced from 0.01 to eliminate farming incentive
         
         if point_collected_this_step:
             # First point bonus (+100), others (+50)
@@ -334,6 +388,8 @@ class ChaseEnv:
                 prey_reward += 100.0
             else:
                 prey_reward += 50.0
+            # Extra prompt-requested point collection bonus
+            prey_reward += 10.0
 
         # Softened inactivity penalty: Enough to discourage camping without being crushing
         if self.steps_since_last_point > 400:
@@ -358,7 +414,7 @@ class ChaseEnv:
             info['captured'] = True
         elif points_win:
             hunter_reward -= 50.0
-            prey_reward += 100.0
+            prey_reward += 300.0
             info['points_win'] = True
 
         # Boundary penalty (Increased weight to -2.0)
