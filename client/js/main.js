@@ -48,6 +48,14 @@
     let isPaused = false;
     let lastTimestamp = 0;
 
+    // Play Mode State
+    let playMode = 'auto'; // 'auto', 'hunter', 'prey'
+    const keys = {
+        w: false, a: false, s: false, d: false,
+        ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false,
+        ' ': false
+    };
+
     // Chart data
     const chartData = {
         captureRates: [],
@@ -322,6 +330,75 @@
                 btn.classList.add('active');
             });
         });
+
+        // Play Mode buttons
+        const playButtons = document.querySelectorAll('.play-btn');
+        const playHint = document.getElementById('play-hint');
+        playButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                playMode = btn.dataset.mode;
+                playButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                if (playMode === 'auto') {
+                    playHint.classList.add('hidden');
+                } else {
+                    playHint.classList.remove('hidden');
+                }
+                
+                NetworkManager.emit('set_play_mode', { mode: playMode });
+            });
+        });
+
+        // Keyboard listeners
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) {
+                keys[e.key] = true;
+                if (e.key === ' ') e.preventDefault(); // Stop scrolling
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+        });
+    }
+
+    let lastAction = -1;
+    function _processInput() {
+        if (playMode === 'auto') return;
+
+        const up = keys.w || keys.ArrowUp;
+        const down = keys.s || keys.ArrowDown;
+        const left = keys.a || keys.ArrowLeft;
+        const right = keys.d || keys.ArrowRight;
+        const jump = keys[' '];
+
+        let action = 0; // Stay
+
+        if (jump) {
+            action = 9;
+        } else if (up && left) {
+            action = 8;
+        } else if (up && right) {
+            action = 2;
+        } else if (down && left) {
+            action = 6;
+        } else if (down && right) {
+            action = 4;
+        } else if (up) {
+            action = 1;
+        } else if (down) {
+            action = 5;
+        } else if (left) {
+            action = 7;
+        } else if (right) {
+            action = 3;
+        }
+
+        // Throttle: Only send if action changed OR every 10 frames (heartbeat)
+        if (action !== lastAction || stepCount % 10 === 0) {
+            NetworkManager.emit('player_input', { action });
+            lastAction = action;
+        }
     }
 
     // === Animation Loop ===
@@ -330,6 +407,10 @@
 
         const deltaTime = (timestamp - lastTimestamp) / 1000;
         lastTimestamp = timestamp;
+
+        if (!isPaused) {
+            _processInput();
+        }
 
         // Update characters
         CharacterManager.update(deltaTime);

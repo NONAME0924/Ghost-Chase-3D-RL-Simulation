@@ -471,37 +471,26 @@ class ChaseEnv:
         if abs(rel_h) < math.radians(20):
             hunter_reward += 0.5
         
-        # Prey Reward: Overhauled for survivability + active seeking
-        prey_reward = 0.5 # Constant survival reward per step
+        # Prey Reward: Balanced (Reverted from Overhauled)
+        prey_reward = dist_3d * 0.005
+        if not p_vis: prey_reward += 0.1
+        else: prey_reward -= 0.1  
         
-        # 1. Distance maintenance (Encourage keeping the gap)
-        prey_reward += dist_3d * 0.05
-        
-        # 2. Escape Reward: Bonus for widening the gap from the hunter
-        if dist_3d > dist_3d_old:
-            prey_reward += (dist_3d - dist_3d_old) * 5.0
-            
-        # 3. Stealth: High reward for remaining unseen by the hunter (h_vis)
-        if not h_vis: 
-            prey_reward += 0.3
-        else:
-            prey_reward -= 0.5 # Penalty for being in the hunter's line of sight
-
-        # 4. Point Gravity Reward: Stronger incentive to move towards points
+        # Point Gravity Reward: Encourage moving towards points
         if p_any > 0:
             d_p_nearest_new, _, _ = self._get_nearest_point_obs(self.prey_pos, self.prey_angle)
             if d_p_nearest_new < d_p_nearest_old:
-                prey_reward += 0.3  # Increased from 0.1
+                prey_reward += 0.1  
             elif d_p_nearest_new > d_p_nearest_old:
-                prey_reward -= 0.1  # Increased from 0.05
+                prey_reward -= 0.05 
             
-            # Visibility reward for points (Help navigation)
+            # Visibility reward for points
             for i in range(3):
                 if self.points_active[i]:
                     pt_vis, _, _ = self._is_in_fov(self.prey_pos, self.prey_angle, self.points_pos[i],
                                                   PREY_FOV_ANGLE, PREY_FOV_RANGE)
                     if pt_vis:
-                        prey_reward += 0.05 # Increased from 0.005
+                        prey_reward += 0.005  
         
         if point_collected_this_step:
             # First point bonus (+100), others (+50)
@@ -531,11 +520,11 @@ class ChaseEnv:
 
         if captured:
             hunter_reward += 150.0 
-            prey_reward -= 150.0 # Increased penalty to match hunter bonus
+            prey_reward -= 50.0 # Reverted from -150
             info['captured'] = True
         elif points_win:
             hunter_reward -= 50.0
-            prey_reward += 500.0 # Increased from 300.0 to prioritize point collection
+            prey_reward += 300.0 # Reverted from +500
             info['points_win'] = True
 
         # Boundary penalty (Increased weight to -2.0)
