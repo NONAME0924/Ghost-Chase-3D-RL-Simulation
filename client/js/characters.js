@@ -8,8 +8,10 @@
 
 const CharacterManager = (function () {
     const CUBE_SIZE = 0.8;
-    const FOV_ANGLE = (120 * Math.PI) / 180; // 120 degrees in radians
-    const FOV_RADIUS = 5.0;
+    const HUNTER_FOV_ANGLE = Math.PI; // 180 degrees
+    const HUNTER_FOV_RADIUS = 10.0;
+    const PREY_FOV_ANGLE = (120 * Math.PI) / 180;
+    const PREY_FOV_RADIUS = 6.0;
     const TRAIL_MAX = 40;
     const LERP_SPEED = 0.15;
 
@@ -33,8 +35,8 @@ const CharacterManager = (function () {
     let pointsGroups = [];
 
     // Target state (for interpolation)
-    let hunterTarget = { x: 0, z: 0, angle: 0 };
-    let preyTarget = { x: 0, z: 0, angle: 0 };
+    let hunterTarget = { x: 0, y: 0, z: 0, angle: 0 };
+    let preyTarget = { x: 0, y: 0, z: 0, angle: 0 };
 
     // Points state
     let pointsState = [
@@ -71,21 +73,21 @@ const CharacterManager = (function () {
         return mesh;
     }
 
-    function _createFovCone(color) {
+    function _createFovCone(color, fovAngle, fovRadius) {
         const segments = 32;
         const geo = new THREE.BufferGeometry();
-        // Initialize vertices with FOV_RADIUS to be visible from frame 1
+        // Initialize vertices with specific radius
         const vertices = new Float32Array((segments + 2) * 3);
-        const halfAngle = FOV_ANGLE / 2;
+        const halfAngle = fovAngle / 2;
         
         // Point 0: Center
         vertices[0] = 0; vertices[1] = 0; vertices[2] = 0;
         // Points 1..segments+1: Perimeter
         for (let i = 0; i <= segments; i++) {
-            const angle = -halfAngle + (FOV_ANGLE * i) / segments;
+            const angle = -halfAngle + (fovAngle * i) / segments;
             const idx = (i + 1) * 3;
-            vertices[idx] = Math.sin(angle) * FOV_RADIUS;
-            vertices[idx + 1] = Math.cos(angle) * FOV_RADIUS;
+            vertices[idx] = Math.sin(angle) * fovRadius;
+            vertices[idx + 1] = Math.cos(angle) * fovRadius;
             vertices[idx + 2] = 0;
         }
 
@@ -154,8 +156,8 @@ const CharacterManager = (function () {
         hunterMesh = _createCube(HUNTER_COLOR, HUNTER_EMISSIVE);
         hunterGroup.add(hunterMesh);
 
-        // FOV cone (normal 120°)
-        hunterFov = _createFovCone(HUNTER_COLOR);
+        // FOV cone (Semi-circle 180°, Radius 15.0)
+        hunterFov = _createFovCone(HUNTER_COLOR, HUNTER_FOV_ANGLE, HUNTER_FOV_RADIUS);
         hunterGroup.add(hunterFov);
 
         // Point light glow
@@ -183,8 +185,8 @@ const CharacterManager = (function () {
         preyMesh = _createCube(PREY_COLOR, PREY_EMISSIVE);
         preyGroup.add(preyMesh);
 
-        // FOV cone (normal 120°)
-        preyFov = _createFovCone(PREY_COLOR);
+        // FOV cone (120°, Radius 8.0)
+        preyFov = _createFovCone(PREY_COLOR, PREY_FOV_ANGLE, PREY_FOV_RADIUS);
         preyGroup.add(preyFov);
 
         // Point light glow
@@ -314,10 +316,12 @@ const CharacterManager = (function () {
 
     function setState(state) {
         hunterTarget.x = state.hunter_x;
+        hunterTarget.y = state.hunter_y;
         hunterTarget.z = state.hunter_z;
         hunterTarget.angle = state.hunter_angle;
 
         preyTarget.x = state.prey_x;
+        preyTarget.y = state.prey_y;
         preyTarget.z = state.prey_z;
         preyTarget.angle = state.prey_angle;
 
@@ -336,9 +340,11 @@ const CharacterManager = (function () {
     function update(deltaTime) {
         // Smoothly interpolate positions
         hunterGroup.position.x += (hunterTarget.x - hunterGroup.position.x) * LERP_SPEED;
+        hunterGroup.position.y += (hunterTarget.y - hunterGroup.position.y) * LERP_SPEED;
         hunterGroup.position.z += (-hunterTarget.z - hunterGroup.position.z) * LERP_SPEED;
 
         preyGroup.position.x += (preyTarget.x - preyGroup.position.x) * LERP_SPEED;
+        preyGroup.position.y += (preyTarget.y - preyGroup.position.y) * LERP_SPEED;
         preyGroup.position.z += (-preyTarget.z - preyGroup.position.z) * LERP_SPEED;
 
         // Smoothly interpolate rotations
@@ -386,15 +392,15 @@ const CharacterManager = (function () {
 
         // Update Dynamic FOVs (with existence check)
         if (showFov) {
-            if (hunterFov) _updateFovMesh(hunterFov, FOV_ANGLE, 32);
-            if (preyFov) _updateFovMesh(preyFov, FOV_ANGLE, 32);
+            if (hunterFov) _updateFovMesh(hunterFov, HUNTER_FOV_ANGLE, HUNTER_FOV_RADIUS, 32);
+            if (preyFov) _updateFovMesh(preyFov, PREY_FOV_ANGLE, PREY_FOV_RADIUS, 32);
         }
     }
 
     const raycaster = new THREE.Raycaster();
     const tempOrigin = new THREE.Vector3();
 
-    function _updateFovMesh(mesh, fov, segments) {
+    function _updateFovMesh(mesh, fov, fovRadius, segments) {
         if (!mesh || !mesh.visible || !mesh.parent) return;
 
         try {
@@ -415,11 +421,11 @@ const CharacterManager = (function () {
                 const worldDir = localDir.applyQuaternion(mesh.parent.quaternion).normalize();
 
                 raycaster.set(tempOrigin, worldDir);
-                let dist = FOV_RADIUS;
+                let dist = fovRadius;
 
                 if (obstacles && obstacles.length > 0) {
                     const intersects = raycaster.intersectObjects(obstacles, true); // Recursive search
-                    if (intersects.length > 0 && intersects[0].distance < FOV_RADIUS) {
+                    if (intersects.length > 0 && intersects[0].distance < fovRadius) {
                         dist = intersects[0].distance;
                     }
                 }

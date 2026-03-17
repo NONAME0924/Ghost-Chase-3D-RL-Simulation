@@ -47,6 +47,10 @@ const NetworkManager = (function () {
             _trigger('captured', data);
         });
 
+        socket.on('prey_win', (data) => {
+            _trigger('preyWin', data);
+        });
+
         socket.on('game_reset', (state) => {
             _trigger('gameReset', state);
         });

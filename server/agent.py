@@ -17,8 +17,8 @@ class SB3Agent:
 
     def __init__(
         self,
-        state_dim=12,
-        action_dim=9,
+        state_dim=14,
+        action_dim=10,
         lr=1e-3,
         gamma=0.99,
         epsilon_start=1.0,

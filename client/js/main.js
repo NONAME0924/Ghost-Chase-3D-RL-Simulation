@@ -16,6 +16,8 @@
     const preyWinPopup = document.getElementById('prey-win-popup');
     const episodeEl = document.getElementById('episode-count');
     const captureEl = document.getElementById('capture-count');
+    const victoryEl = document.getElementById('victory-count');
+    const drawEl = document.getElementById('draw-count');
     const stepEl = document.getElementById('step-count');
     const distanceEl = document.getElementById('distance-value');
     const connectionEl = document.getElementById('connection-status');
@@ -31,6 +33,8 @@
     const trainProgressText = document.getElementById('train-progress-text');
     const trainEpsilon = document.getElementById('train-epsilon');
     const trainCapRate = document.getElementById('train-cap-rate');
+    const trainVicRate = document.getElementById('train-vic-rate');
+    const trainDrawRate = document.getElementById('train-draw-rate');
     const trainRewardH = document.getElementById('train-reward-h');
     const trainRewardP = document.getElementById('train-reward-p');
     const trainChart = document.getElementById('train-chart');
@@ -38,6 +42,8 @@
 
     // === State ===
     let captureCount = 0;
+    let victoryCount = 0;
+    let drawCount = 0;
     let stepCount = 0;
     let isPaused = false;
     let lastTimestamp = 0;
@@ -122,7 +128,11 @@
             }, 1200);
         });
 
-        NetworkManager.on('prey_win', (data) => {
+        NetworkManager.on('preyWin', (data) => {
+            victoryCount++;
+            if (victoryEl) victoryEl.textContent = victoryCount;
+
+            // Show victory popup
             preyWinPopup.classList.remove('hidden');
             preyWinPopup.classList.add('visible');
 
@@ -166,12 +176,23 @@
         // Stats
         trainEpsilon.textContent = data.epsilon.toFixed(4);
         trainCapRate.textContent = data.capture_rate + '%';
+        if (trainVicRate) trainVicRate.textContent = data.victory_rate + '%';
+        if (trainDrawRate) trainDrawRate.textContent = data.draw_rate + '%';
         trainRewardH.textContent = data.avg_reward_h.toFixed(2);
         trainRewardP.textContent = data.avg_reward_p.toFixed(2);
 
-        // Update capture count from server
+        // Update counts from server
         captureEl.textContent = data.total_captures;
         captureCount = data.total_captures;
+        
+        if (victoryEl) {
+            victoryEl.textContent = data.total_victories;
+            victoryCount = data.total_victories;
+        }
+        if (drawEl) {
+            drawEl.textContent = data.total_draws;
+            drawCount = data.total_draws;
+        }
 
         // Chart data
         chartData.captureRates.push(data.capture_rate);

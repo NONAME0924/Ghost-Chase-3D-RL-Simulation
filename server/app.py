@@ -29,8 +29,8 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # === Global game state ===
 env = ChaseEnv()
-hunter_agent = DQNAgent(state_dim=12, action_dim=NUM_ACTIONS)
-prey_agent = DQNAgent(state_dim=12, action_dim=NUM_ACTIONS)
+hunter_agent = DQNAgent(state_dim=14, action_dim=NUM_ACTIONS)
+prey_agent = DQNAgent(state_dim=14, action_dim=NUM_ACTIONS)
 
 game_running = False
 paused = False
@@ -47,9 +47,13 @@ train_settings = {
 train_stats = {
     "episode": 0,
     "total_captures": 0,
+    "total_victories": 0,
+    "total_draws": 0,
     "recent_rewards_h": [],
     "recent_rewards_p": [],
     "recent_captures": [],
+    "recent_victories": [],
+    "recent_draws": [],
     "epsilon": 1.0,
     "loss_h": 0.0,
     "loss_p": 0.0,
@@ -95,6 +99,11 @@ def training_loop():
 
     game_running = True
     max_episodes = train_settings["max_episodes"]
+    
+    # Early stopping state
+    max_combined_reward = -float('inf')
+    non_improvement_episodes = 0
+    STOP_THRESHOLD = 10 # Stop if no improvement for 10 episodes
 
     print(f"\n  Starting live training for {max_episodes} episodes...")
     print(f"  Speed: {train_settings['speed']} | Visualize: every episode\n")
@@ -103,7 +112,7 @@ def training_loop():
         if not game_running:
             break
 
-        hunter_obs, prey_obs = env.reset()
+        hunter_obs, prey_obs = env.reset(episode=episode)
         train_stats["episode"] = episode
         episode_reward_h = 0.0
         episode_reward_p = 0.0
@@ -161,11 +170,13 @@ def training_loop():
                 state["episode"] = episode
                 state["captured"] = info.get("captured", False)
                 socketio.emit("game_state", state)
-
-                # Frame delay
-                tick = get_tick_interval()
-                if tick > 0:
-                    socketio.sleep(tick)
+            
+            # --- Yield control ---
+            tick = get_tick_interval()
+            if tick > 0 and should_render:
+                socketio.sleep(tick)
+            else:
+                socketio.sleep(0.001)
 
         # --- Episode done ---
         captured = info.get("captured", False)
@@ -174,12 +185,15 @@ def training_loop():
         if captured:
             train_stats["total_captures"] += 1
             socketio.emit("captured", {"episode": episode})
-            if train_settings["speed"] <= 2:
-                socketio.sleep(0.5)
+            # Added slight delay for all speeds to ensure popup is visible
+            socketio.sleep(0.3)
         elif points_win:
+            train_stats["total_victories"] += 1
             socketio.emit("prey_win", {"episode": episode})
-            if train_settings["speed"] <= 2:
-                socketio.sleep(0.5)
+            socketio.sleep(0.3)
+        else:
+            train_stats["total_draws"] += 1
+            socketio.sleep(0.1)
 
         # Decay epsilon
         hunter_agent.decay_epsilon()
@@ -190,17 +204,23 @@ def training_loop():
         train_stats["recent_rewards_h"].append(episode_reward_h)
         train_stats["recent_rewards_p"].append(episode_reward_p)
         train_stats["recent_captures"].append(1 if captured else 0)
+        train_stats["recent_victories"].append(1 if points_win else 0)
+        train_stats["recent_draws"].append(1 if (not captured and not points_win) else 0)
 
         # Keep only last 100 for averaging
         if len(train_stats["recent_rewards_h"]) > 100:
             train_stats["recent_rewards_h"] = train_stats["recent_rewards_h"][-100:]
             train_stats["recent_rewards_p"] = train_stats["recent_rewards_p"][-100:]
             train_stats["recent_captures"] = train_stats["recent_captures"][-100:]
+            train_stats["recent_victories"] = train_stats["recent_victories"][-100:]
+            train_stats["recent_draws"] = train_stats["recent_draws"][-100:]
 
         # Compute averages
         avg_h = np.mean(train_stats["recent_rewards_h"][-50:]) if train_stats["recent_rewards_h"] else 0
         avg_p = np.mean(train_stats["recent_rewards_p"][-50:]) if train_stats["recent_rewards_p"] else 0
         cap_rate = np.mean(train_stats["recent_captures"][-50:]) * 100 if train_stats["recent_captures"] else 0
+        vic_rate = np.mean(train_stats["recent_victories"][-50:]) * 100 if train_stats["recent_victories"] else 0
+        draw_rate = np.mean(train_stats["recent_draws"][-50:]) * 100 if train_stats["recent_draws"] else 0
 
         # Emit training stats to frontend
         socketio.emit("train_stats", {
@@ -210,7 +230,11 @@ def training_loop():
             "avg_reward_h": round(avg_h, 2),
             "avg_reward_p": round(avg_p, 2),
             "capture_rate": round(cap_rate, 1),
+            "victory_rate": round(vic_rate, 1),
+            "draw_rate": round(draw_rate, 1),
             "total_captures": train_stats["total_captures"],
+            "total_victories": train_stats["total_victories"],
+            "total_draws": train_stats["total_draws"],
             "loss_h": round(loss_h, 4) if loss_h else 0,
             "loss_p": round(loss_p, 4) if loss_p else 0,
             "steps": step_count,
@@ -230,6 +254,31 @@ def training_loop():
         if episode % 200 == 0:
             hunter_agent.save(os.path.join(MODEL_DIR, "hunter.pth"))
             prey_agent.save(os.path.join(MODEL_DIR, "prey.pth"))
+            
+        # --- Early Stopping Logic ---
+        combined_reward = episode_reward_h + episode_reward_p
+        
+        # Only start counting stagnation once both agents have reached a baseline performance (> 100)
+        if episode_reward_h > 100 and episode_reward_p > 100:
+            if combined_reward > max_combined_reward:
+                max_combined_reward = combined_reward
+                non_improvement_episodes = 0
+            else:
+                non_improvement_episodes += 1
+        else:
+            # Haven't reached the "both > 100" threshold yet, or 
+            # dropped back below it. Reset counter to keep training.
+            non_improvement_episodes = 0
+            if combined_reward > max_combined_reward:
+                max_combined_reward = combined_reward
+            
+        if non_improvement_episodes >= STOP_THRESHOLD:
+            print(f"\n  [Early Stop] Both agents > 100 and no improvement for {STOP_THRESHOLD} episodes. Terminating.")
+            socketio.emit("train_complete", {
+                "episodes": episode,
+                "reason": "Early stop due to reward stagnation"
+            })
+            break
 
     # Final save
     hunter_agent.save(os.path.join(MODEL_DIR, "hunter.pth"))
@@ -258,7 +307,7 @@ def demo_loop():
 
     while game_running:
         episode_count += 1
-        hunter_obs, prey_obs = env.reset()
+        hunter_obs, prey_obs = env.reset(episode=episode_count)
 
         state = env.get_state()
         state["episode"] = episode_count
@@ -285,10 +334,10 @@ def demo_loop():
 
         if info.get("captured", False):
             socketio.emit("captured", {"episode": episode_count})
-            socketio.sleep(1.0)
+            socketio.sleep(0.3)
         elif info.get("points_win", False):
             socketio.emit("prey_win", {"episode": episode_count})
-            socketio.sleep(1.0)
+            socketio.sleep(0.3)
 
 
 # === Routes ===
@@ -301,6 +350,9 @@ def index():
 def static_files(path):
     return send_from_directory(CLIENT_DIR, path)
 
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204 # No content, stops 404 logs
 
 # === SocketIO Events ===
 @socketio.on("connect")
@@ -340,7 +392,9 @@ def on_set_speed(data):
 
 @socketio.on("reset")
 def on_reset(*args):
-    hunter_obs, prey_obs = env.reset()
+    # We don't have a specific episode count here easily without more globals, 
+    # but we can use the latest train_stats episode.
+    hunter_obs, prey_obs = env.reset(episode=train_stats["episode"])
     state = env.get_state()
     state["episode"] = train_stats["episode"]
     state["captured"] = False
